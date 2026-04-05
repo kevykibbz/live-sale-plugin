@@ -1675,20 +1675,259 @@ function lsg_chat_shortcode() : string {
     ob_start();
     ?>
     <div id="lsg-chat">
-        <div id="lsg-chat-messages" style="border:1px solid #ccc;height:320px;overflow-y:auto;padding:12px;background:#f9f9f9;border-radius:6px;"></div>
-        <div style="margin-top:10px;display:flex;gap:8px;">
-            <input type="text" id="lsg-chat-input" style="flex:1;padding:8px;" placeholder="Type a message…">
-            <button id="lsg-chat-send" class="button button-primary">Send</button>
+        <div id="lsg-chat-header">
+            <span class="lsg-chat-title">Live Chat</span>
+        </div>
+        <div id="lsg-chat-messages"></div>
+        <div id="lsg-chat-footer">
+            <div id="lsg-chat-input-row">
+                <input type="text" id="lsg-chat-input" placeholder="Type a message…" autocomplete="off">
+                <button id="lsg-chat-send" title="Send">
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                </button>
+            </div>
             <?php if ( $is_admin ) : ?>
-                <button id="lsg-chat-clear" class="button">Clear All</button>
+            <div id="lsg-chat-admin-bar">
+                <button id="lsg-chat-clear">🗑 Clear All Messages</button>
+            </div>
             <?php endif; ?>
         </div>
     </div>
     <style>
-        .lsg-chat-msg { display:flex; justify-content:space-between; align-items:flex-start;
-            padding:6px 0; border-bottom:1px solid #eee; font-size:13px; }
-        .lsg-chat-msg .lsg-del-btn { color:#c00; cursor:pointer; font-size:11px; white-space:nowrap; margin-left:10px; }
-        .lsg-chat-msg .lsg-del-btn:hover { color:#f00; text-decoration:underline; }
+        #lsg-chat {
+            max-width: 700px;
+            margin: 0 auto;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 4px 28px rgba(0,0,0,0.10);
+            background: #fff;
+            border: 1px solid #e5e7eb;
+        }
+        #lsg-chat-header {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            padding: 15px 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .lsg-live-dot {
+            width: 10px; height: 10px;
+            background: #2ecc71;
+            border-radius: 50%;
+            animation: lsg-chat-pulse-dot 1.6s infinite;
+            flex-shrink: 0;
+        }
+        .lsg-chat-title {
+            color: #fff;
+            font-weight: 700;
+            font-size: 15px;
+            letter-spacing: 0.2px;
+        }
+        #lsg-chat-messages {
+            height: 380px;
+            overflow-y: auto;
+            padding: 18px 16px;
+            background: #f8fafc;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            scroll-behavior: smooth;
+        }
+        #lsg-chat-messages::-webkit-scrollbar { width: 4px; }
+        #lsg-chat-messages::-webkit-scrollbar-track { background: transparent; }
+        #lsg-chat-messages::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 2px; }
+        .lsg-chat-msg {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            animation: lsg-chat-fadein 0.2s ease;
+        }
+        .lsg-chat-avatar {
+            width: 36px; height: 36px;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            color: #fff;
+            font-weight: 700;
+            font-size: 14px;
+            flex-shrink: 0;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+        }
+        .lsg-chat-bubble {
+            background: #fff;
+            border-radius: 0 14px 14px 14px;
+            padding: 9px 13px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+            border: 1px solid #e5e7eb;
+            flex: 1;
+            min-width: 0;
+        }
+        .lsg-chat-bubble-admin {
+            background: #eff6ff;
+            border-color: #bfdbfe;
+        }
+        .lsg-chat-meta {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 3px;
+        }
+        .lsg-chat-username {
+            font-weight: 700;
+            font-size: 12px;
+            color: #374151;
+        }
+        .lsg-admin-badge {
+            background: #3b82f6;
+            color: #fff;
+            font-size: 9px;
+            font-weight: 700;
+            padding: 1px 6px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .lsg-chat-text {
+            font-size: 14px;
+            color: #1f2937;
+            line-height: 1.55;
+            word-break: break-word;
+        }
+        .lsg-del-btn {
+            background: none;
+            border: none;
+            color: #d1d5db;
+            cursor: pointer;
+            font-size: 20px;
+            line-height: 1;
+            padding: 4px 6px;
+            border-radius: 6px;
+            flex-shrink: 0;
+            margin-top: 6px;
+            transition: color 0.15s, background 0.15s;
+        }
+        .lsg-del-btn:hover { color: #ef4444; background: #fee2e2; }
+        #lsg-chat-footer {
+            padding: 12px 16px;
+            background: #fff;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        #lsg-chat-input-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        #lsg-chat-input {
+            flex: 1;
+            padding: 10px 18px;
+            border: 1.5px solid #e5e7eb;
+            border-radius: 24px;
+            font-size: 14px;
+            outline: none;
+            background: #f8fafc;
+            transition: border-color 0.2s, background 0.2s;
+            color: #1f2937;
+        }
+        #lsg-chat-input:focus { border-color: #3b82f6; background: #fff; }
+        #lsg-chat-input::placeholder { color: #9ca3af; }
+        #lsg-chat-send {
+            width: 44px; height: 44px;
+            background: #3b82f6;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+            padding: 0;
+            transition: background 0.2s, transform 0.1s;
+            box-shadow: 0 2px 8px rgba(59,130,246,0.35);
+        }
+        #lsg-chat-send:hover { background: #2563eb; }
+        #lsg-chat-send:active { transform: scale(0.92); }
+        #lsg-chat-send svg { width: 18px; height: 18px; fill: #fff; }
+        #lsg-chat-send:disabled { background: #93c5fd; cursor: not-allowed; box-shadow: none; }
+        #lsg-chat-admin-bar { display: flex; justify-content: flex-end; }
+        #lsg-chat-clear {
+            background: none;
+            border: 1px solid #e5e7eb;
+            color: #9ca3af;
+            font-size: 12px;
+            padding: 5px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        #lsg-chat-clear:hover { border-color: #ef4444; color: #ef4444; background: #fef2f2; }
+        @keyframes lsg-chat-fadein {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: none; }
+        }
+        @keyframes lsg-chat-pulse-dot {
+            0%,100% { box-shadow: 0 0 0 0 rgba(46,204,113,0.5); }
+            50%      { box-shadow: 0 0 0 6px rgba(46,204,113,0); }
+        }
+        .lsg-sending-tick {
+            font-size: 11px;
+            color: #9ca3af;
+            animation: lsg-tick-spin 1s linear infinite;
+            display: inline-block;
+        }
+        .lsg-chat-failed .lsg-sending-tick { animation: none; color: #ef4444; cursor: default; }
+        .lsg-chat-failed .lsg-chat-bubble { border-color: #fca5a5 !important; background: #fef2f2 !important; }
+        .lsg-chat-time {
+            font-size: 10px;
+            color: #9ca3af;
+            white-space: nowrap;
+            margin-left: auto;
+            padding-left: 6px;
+            flex-shrink: 0;
+        }
+        /* Skeleton loader */
+        .lsg-skel-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            animation: lsg-chat-fadein 0.3s ease;
+        }
+        .lsg-skel-avatar {
+            width: 36px; height: 36px;
+            border-radius: 50%;
+            background: #e5e7eb;
+            flex-shrink: 0;
+            animation: lsg-skel-shimmer 1.4s infinite;
+        }
+        .lsg-skel-bubble {
+            flex: 1;
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 0 14px 14px 14px;
+            padding: 10px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .lsg-skel-line {
+            height: 10px;
+            border-radius: 6px;
+            background: #e5e7eb;
+            animation: lsg-skel-shimmer 1.4s infinite;
+        }
+        .lsg-skel-name  { width: 28%; }
+        .lsg-skel-wide  { width: 72%; }
+        .lsg-skel-short { width: 44%; }
+        @keyframes lsg-skel-shimmer {
+            0%   { background-color: #e5e7eb; }
+            50%  { background-color: #f3f4f6; }
+            100% { background-color: #e5e7eb; }
+        }
+        @keyframes lsg-tick-spin {
+            0%   { opacity: 1; }
+            50%  { opacity: 0.3; }
+            100% { opacity: 1; }
+        }
     </style>
     <?php
     wp_enqueue_script(
@@ -1698,10 +1937,13 @@ function lsg_chat_shortcode() : string {
         filemtime( plugin_dir_path( __FILE__ ) . 'livesale-chat.js' ),
         true
     );
+    $current_user = wp_get_current_user();
+    $chat_username = $is_admin ? 'Admin' : ( $current_user->display_name ?: $current_user->user_login );
     wp_localize_script( 'lsg-chat', 'lsgChat', [
         'ajax'         => admin_url( 'admin-ajax.php' ),
         'nonce'        => wp_create_nonce( 'lsg_chat_nonce' ),
         'is_admin'     => $is_admin,
+        'username'     => $chat_username,
         'ably_key'     => ABLY_API_KEY,
         'ably_channel' => ABLY_CHAT_CHANNEL,
     ] );
@@ -1727,7 +1969,7 @@ function lsg_ajax_send_chat() {
     $msg  = sanitize_text_field( $_POST['message'] ?? '' );
     if ( ! $msg ) wp_send_json_error( 'Empty message.' );
     $chat   = get_option( 'lsg_chat', [] );
-    $chat[] = [ 'user' => $name, 'msg' => $msg ];
+    $chat[] = [ 'user' => $name, 'msg' => $msg, 'ts' => time() ];
     $chat   = array_slice( $chat, -50 );
     update_option( 'lsg_chat', $chat );
     lsg_ably_publish( ABLY_CHAT_CHANNEL, 'new-message', [ 'user' => $name, 'message' => $msg, 'timestamp' => time() ] );
@@ -1740,7 +1982,7 @@ add_action( 'wp_ajax_lsg_admin_send_chat', function () {
     $msg  = sanitize_text_field( $_POST['message'] ?? '' );
     if ( ! $msg ) wp_send_json_error( 'Empty.' );
     $chat   = get_option( 'lsg_chat', [] );
-    $chat[] = [ 'user' => 'Admin', 'msg' => $msg ];
+    $chat[] = [ 'user' => 'Admin', 'msg' => $msg, 'ts' => time() ];
     $chat   = array_slice( $chat, -50 );
     update_option( 'lsg_chat', $chat );
     lsg_ably_publish( ABLY_CHAT_CHANNEL, 'new-message', [ 'user' => 'Admin', 'message' => $msg, 'timestamp' => time() ] );

@@ -68,3 +68,43 @@ livesale/
 ├── livesale-chat.js      # Frontend JS for the chat
 └── README.md
 ```
+
+---
+
+## Giveaway System
+
+Each product can be turned into a giveaway by the admin. The full flow is:
+
+1. **Admin marks a product as Giveaway** and sets a countdown duration
+2. A **live countdown timer** displays on the product card for all visitors
+3. When the timer hits zero, the server automatically **rolls a winner** from the claimed users list (WP cron)
+4. The winner is broadcast to all connected browsers via Ably
+5. **Winner's browser** shows:
+   - Green banner: *"🏆 You won this giveaway!"*
+   - Pulsing green button: *"🎁 View Your Order #X"* — links to WooCommerce orders page
+   - Personal toast: *"🎉 You Won the giveaway!"*
+6. **Everyone else** sees:
+   - Yellow banner: *"🏆 Winner: [name]"*
+   - Grey disabled button: *"Giveaway Ended"*
+   - Toast: *"🏆 Giveaway winner: [name]"*
+7. A **free WooCommerce order (KSh 0)** is automatically created for the winner:
+   - Status: Processing
+   - Payment method: Giveaway Win
+   - Customer-visible order note explaining the prize
+8. A **congratulations email** is sent to the winner with a link to their order
+9. Available stock is decremented by 1 for the winner
+
+### Giveaway Admin Controls
+
+| Control | Location | Purpose |
+|---------|----------|---------|
+| Enable Giveaway | Products tab → Giveaway checkbox | Marks product as a giveaway |
+| Set Timer | Products tab → Countdown duration | Sets how long until winner is rolled |
+| View winner | Products tab → Giveaway Winner column | Shows winner username after roll |
+| View order | WooCommerce → Orders | Free order at KSh 0 created automatically |
+
+### Giveaway Technical Notes
+
+- Winner selection is **server-side only** — cannot be manipulated from the browser
+- Processing is **idempotent** — the `lsg_win_processed` meta flag prevents duplicate orders even if cron fires more than once
+- Winner identity check is done **server-side per request** — each user's browser only knows if *they* won, not other users' status
