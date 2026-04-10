@@ -1,0 +1,395 @@
+﻿/* ================================================================
+   Live Sale - Live View Layout + Chat Panel  v2.0 (light theme)
+   Loaded via wp_enqueue_style() from live-view.php
+   ================================================================ */
+
+/* ----------------------------------------------------------------
+   LIVE VIEW: Full-bleed wrapper + top bar
+   ---------------------------------------------------------------- */
+.lsg-lv-wrap {
+    width: 100vw;
+    margin-left: calc(-50vw + 50%);
+    max-width: 100vw;
+    overflow-x: hidden;          /* 100vw includes scrollbar; clip so no h-scroll */
+    box-sizing: border-box;
+    padding: 0 24px 48px;        /* 24px side margins so video+chat never touch browser edge */
+    background: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.lsg-lv-topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 24px;
+    border-bottom: 1px solid #eee;
+}
+
+.lsg-live-pill {
+    background: #e53935;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 900;
+    padding: 4px 12px;
+    border-radius: 20px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    animation: lsg-live-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes lsg-live-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(229,57,53,0.45); }
+    50%       { box-shadow: 0 0 0 7px rgba(229,57,53,0); }
+}
+
+.lsg-lv-viewers {
+    font-size: 13px;
+    color: #666;
+    font-weight: 500;
+}
+
+/* ----------------------------------------------------------------
+   LIVE VIEW: Two-column layout - video | chat
+   ---------------------------------------------------------------- */
+.lsg-lv-columns {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: 0;
+    width: 100%;               /* explicitly fill the full-bleed wrap */
+    max-width: 100%;
+    background: #0a0a0a;
+}
+
+.lsg-lv-video-col {
+    display: flex;
+    flex-direction: column;
+    background: #000;
+}
+
+.lsg-lv-stage {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: #000;
+    overflow: hidden;
+}
+
+.lsg-lv-video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+    object-fit: cover;
+}
+
+.lsg-lv-play-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.38);
+    transition: opacity 400ms ease;
+    z-index: 5;
+    cursor: pointer;
+}
+
+/* ---- Pulsating outward rings ---- */
+.lsg-play-ring {
+    position: absolute;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.55);
+    animation: lsg-ring-pulse 2.4s ease-out infinite;
+    pointer-events: none;
+}
+.lsg-play-ring--1 { width: 80px;  height: 80px;  animation-delay: 0s; }
+.lsg-play-ring--2 { width: 80px;  height: 80px;  animation-delay: 0.8s; }
+.lsg-play-ring--3 { width: 80px;  height: 80px;  animation-delay: 1.6s; }
+
+@keyframes lsg-ring-pulse {
+    0%   { transform: scale(1);    opacity: 0.7; }
+    100% { transform: scale(2.4);  opacity: 0;   }
+}
+
+/* ---- Play button circle ---- */
+.lsg-lv-play-btn {
+    position: relative;
+    z-index: 1;
+    background: rgba(255,255,255,0.18);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    border: 2px solid rgba(255,255,255,0.7);
+    border-radius: 50%;
+    cursor: pointer;
+    padding: 0;
+    width: 80px;
+    height: 80px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 200ms ease, transform 200ms ease;
+}
+
+.lsg-lv-play-overlay:hover .lsg-lv-play-btn {
+    background: rgba(255,255,255,0.28);
+    transform: scale(1.08);
+}
+
+.lsg-lv-play-btn svg {
+    width: 28px;
+    height: 28px;
+    display: block;
+    margin-left: 4px; /* optical centre for play triangle */
+}
+
+/* ----------------------------------------------------------------
+   CHAT COLUMN (right side)
+   ---------------------------------------------------------------- */
+.lsg-lv-chat-col {
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    border-left: 1px solid #e0e0e0;
+}
+
+#lsg-chat {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 480px;
+    background: #fff;
+    color: #111;
+    overflow: hidden;
+}
+
+/* Chat header */
+#lsg-live-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid #e8e8e8;
+    background: #fafafa;
+    flex-shrink: 0;
+}
+
+.lsg-lv-chat-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #111;
+    flex: 1;
+}
+
+/* Messages area */
+#lsg-chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 12px 14px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    scroll-behavior: smooth;
+    background: #fff;
+}
+
+#lsg-chat-messages::-webkit-scrollbar { width: 4px; }
+#lsg-chat-messages::-webkit-scrollbar-track { background: #f5f5f5; }
+#lsg-chat-messages::-webkit-scrollbar-thumb { background: #ddd; border-radius: 2px; }
+
+/* Older messages fade like live streaming */
+#lsg-chat-messages > *:nth-last-child(n+9) { opacity: 0.25; }
+#lsg-chat-messages > *:nth-last-child(8)   { opacity: 0.38; }
+#lsg-chat-messages > *:nth-last-child(7)   { opacity: 0.50; }
+#lsg-chat-messages > *:nth-last-child(6)   { opacity: 0.62; }
+#lsg-chat-messages > *:nth-last-child(5)   { opacity: 0.76; }
+
+.lsg-chat-msg {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: #f7f7f7;
+    line-height: 1.5;
+    animation: lsg-msg-in 0.22s ease;
+    transition: opacity 0.4s ease;
+}
+
+@keyframes lsg-msg-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.lsg-chat-username {
+    font-weight: 700;
+    font-size: 12.5px;
+    flex-shrink: 0;
+    color: #1557b0;
+}
+
+.lsg-admin-badge {
+    background: #1557b0;
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    vertical-align: middle;
+}
+
+.lsg-chat-sep {
+    color: #bbb;
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.lsg-chat-text {
+    font-size: 13px;
+    color: #333;
+    word-break: break-word;
+    flex: 1;
+    min-width: 0;
+}
+
+.lsg-join-notif {
+    font-size: 11px;
+    color: #aaa;
+    text-align: center;
+    padding: 3px 0;
+    animation: lsg-msg-in 0.25s ease;
+}
+
+.lsg-chat-failed { background: rgba(229,57,53,0.08) !important; }
+
+.lsg-sending-tick {
+    font-size: 11px;
+    color: #bbb;
+    animation: lsg-tick-blink 1s ease infinite;
+    display: inline-block;
+}
+
+@keyframes lsg-tick-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* Chat footer / input */
+#lsg-chat-footer {
+    padding: 10px 14px 14px;
+    background: #fafafa;
+    border-top: 1px solid #e8e8e8;
+    flex-shrink: 0;
+}
+
+#lsg-chat-input-row { display: flex; gap: 8px; align-items: center; }
+
+#lsg-chat-input {
+    flex: 1;
+    padding: 10px 16px;
+    border: 1.5px solid #ddd;
+    border-radius: 24px;
+    font-size: 13px;
+    outline: none;
+    background: #fff;
+    color: #111;
+    caret-color: #1557b0;
+    transition: border-color 0.2s;
+}
+
+#lsg-chat-input:focus { border-color: #1557b0; }
+#lsg-chat-input::placeholder { color: #aaa; }
+
+#lsg-chat-send {
+    width: 40px;
+    height: 40px;
+    background: #1557b0;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    padding: 0;
+    transition: background 0.2s, transform 0.1s;
+    box-shadow: 0 2px 8px rgba(21,87,176,0.3);
+}
+
+#lsg-chat-send:hover  { background: #0d3e8a; }
+#lsg-chat-send:active { transform: scale(0.9); }
+#lsg-chat-send svg    { width: 17px; height: 17px; fill: #fff; }
+#lsg-chat-send:disabled { background: #c5d5ee; cursor: not-allowed; box-shadow: none; }
+
+#lsg-chat-login-prompt {
+    text-align: center;
+    font-size: 13px;
+    color: #777;
+    padding: 10px 8px;
+    margin: 0;
+}
+
+#lsg-chat-login-prompt a {
+    color: #1557b0;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+#lsg-chat-login-prompt a:hover { text-decoration: underline; }
+
+/* Skeleton loader */
+.lsg-skel-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    border-radius: 8px;
+    background: #f5f5f5;
+    animation: lsg-msg-in 0.3s ease;
+}
+
+.lsg-skel-name  { width: 65px;  height: 9px; border-radius: 5px; }
+.lsg-skel-wide  { width: 130px; height: 9px; border-radius: 5px; }
+.lsg-skel-short { width: 85px;  height: 9px; border-radius: 5px; }
+
+.lsg-skel-name,
+.lsg-skel-wide,
+.lsg-skel-short {
+    background: linear-gradient(90deg, #ebebeb 25%, #f5f5f5 50%, #ebebeb 75%);
+    background-size: 800px 100%;
+    animation: lsg-skel-shimmer 1.4s infinite linear;
+}
+
+@keyframes lsg-skel-shimmer {
+    0%   { background-position: -800px 0; }
+    100% { background-position:  800px 0; }
+}
+
+/* ----------------------------------------------------------------
+   PRODUCT GRID below the player
+   ---------------------------------------------------------------- */
+.lsg-lv-products {
+    max-width: 1400px;
+    margin: 0 auto;
+    /* side padding comes from .lsg-lv-wrap — no extra padding needed here */
+}
+
+/* ----------------------------------------------------------------
+   RESPONSIVE
+   ---------------------------------------------------------------- */
+@media (max-width: 1024px) {
+    .lsg-lv-columns { grid-template-columns: 1fr 320px; }
+}
+
+@media (max-width: 768px) {
+    .lsg-lv-columns { grid-template-columns: 1fr; }
+
+    .lsg-lv-chat-col {
+        border-left: none;
+        border-top: 1px solid #e0e0e0;
+    }
+
+    #lsg-chat { min-height: 380px; }
+}

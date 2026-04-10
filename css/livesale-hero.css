@@ -1,0 +1,423 @@
+/* LSG Hero v1.0 - Homepage hero, trust badges, feature strip */
+
+/* ============================================================
+   Root vars
+   ============================================================ */
+:root {
+  --lsg-hero-font:     var(--bt-font-family-body, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  --lsg-hero-text:     var(--bt-color-body-text, #212121);
+  --lsg-hero-radius:   var(--bt-border-radius-button, 0px);
+  --lsg-hero-btn-bg:   var(--bt-color-button-bg, #212121);
+  --lsg-hero-btn-clr:  var(--bt-color-button, #ffffff);
+  --lsg-hero-trans:    200ms ease;
+}
+
+/* ============================================================
+   Full-bleed breakout - escapes Botiga container max-width
+   ============================================================ */
+.lsg-hero {
+  display: block;
+  width: 100vw;
+  /* calc() breakout: shifts left by the container's left margin */
+  margin-left: calc(-50vw + 50%);
+  margin-right: calc(-50vw + 50%);
+  max-width: 100vw;
+  overflow-x: hidden;
+  font-family: var(--lsg-hero-font);
+  background: #f0f5fa;
+  box-sizing: border-box;
+  position: relative;
+}
+
+/* Remove extra margin Botiga applies inside entry-content */
+.entry-content .lsg-hero {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+/* ============================================================
+   Home page — flush hero directly below header
+   ============================================================ */
+
+/* 1. Kill Botiga's 80px top margin on the page wrapper */
+body.home .content-wrapper {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+
+/* 2. Hide the "Home" page title */
+body.home .entry-header {
+  display: none !important;
+}
+
+/* 3. Remove any padding WordPress/Botiga adds above entry-content */
+body.home .entry-content {
+  padding-top: 0 !important;
+  margin-top: 0 !important;
+}
+
+/* 4. Remove article padding that some themes add */
+body.home article.page {
+  padding-top: 0 !important;
+  margin-top: 0 !important;
+}
+
+/* ============================================================
+   Slider shell
+   ============================================================ */
+.lsg-hero__slider {
+  position: relative;
+  overflow: hidden;
+}
+
+.lsg-hero__slide {
+  display: none;
+}
+
+/* Incoming slide — eases in from the right, 200ms delay for a staged feel */
+.lsg-hero__slide.is-active {
+  display: block;
+  animation: lsg-slide-enter 800ms cubic-bezier(0.25, 0.1, 0.25, 1) 200ms both;
+}
+
+/* Outgoing slide — overlays while it exits left */
+.lsg-hero__slide.is-leaving {
+  display: block;
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  pointer-events: none;
+  animation: lsg-slide-leave 500ms cubic-bezier(0.4, 0, 0.6, 1) forwards;
+}
+
+@keyframes lsg-slide-enter {
+  from {
+    opacity: 0;
+    transform: translateX(60px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes lsg-slide-leave {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-60px);
+  }
+}
+
+/* ============================================================
+   Inner two-column grid
+   ============================================================ */
+.lsg-hero__inner {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  max-width: 1200px;
+  margin: 0 auto;
+  min-height: 520px;
+  align-items: stretch;
+}
+
+/* ============================================================
+   Text column
+   ============================================================ */
+.lsg-hero__content {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 60px 48px 60px 40px;
+}
+
+.lsg-hero__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--lsg-slide-accent, #046bd2);
+  background: rgba(4, 107, 210, .1);
+  padding: 5px 14px;
+  border-radius: 100px;
+  margin-bottom: 18px;
+  width: fit-content;
+}
+
+.lsg-hero__title {
+  font-size: clamp(1.9rem, 4vw, 3.2rem);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -.02em;
+  color: var(--lsg-hero-text);
+  margin: 0 0 18px;
+  font-family: var(--lsg-hero-font);
+}
+
+.lsg-hero__title em {
+  font-style: normal;
+  color: var(--lsg-slide-accent, #046bd2);
+}
+
+.lsg-hero__desc {
+  font-size: 1rem;
+  line-height: 1.7;
+  color: #555;
+  max-width: 400px;
+  margin: 0 0 32px;
+}
+
+/* ============================================================
+   CTA buttons
+   ============================================================ */
+.lsg-hero__ctas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.lsg-hero__btn {
+  display: inline-block;
+  padding: 12px 26px;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--lsg-hero-font);
+  border-radius: var(--lsg-hero-radius);
+  text-decoration: none;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--lsg-hero-trans), color var(--lsg-hero-trans), border-color var(--lsg-hero-trans);
+}
+
+.lsg-hero__btn--primary {
+  background: var(--lsg-slide-accent, #046bd2);
+  color: #fff;
+  border: 2px solid var(--lsg-slide-accent, #046bd2);
+}
+
+.lsg-hero__btn--primary:hover,
+.lsg-hero__btn--primary:focus {
+  background: var(--lsg-slide-accent-dark, #033d78);
+  border-color: var(--lsg-slide-accent-dark, #033d78);
+  color: #fff;
+}
+
+.lsg-hero__btn--outline {
+  background: transparent;
+  color: var(--lsg-hero-text);
+  border: 2px solid #ccc;
+}
+
+.lsg-hero__btn--outline:hover,
+.lsg-hero__btn--outline:focus {
+  border-color: var(--lsg-slide-accent, #046bd2);
+  color: var(--lsg-slide-accent, #046bd2);
+}
+
+/* ============================================================
+   Dot controls
+   ============================================================ */
+.lsg-hero__controls {
+  display: flex;
+  gap: 7px;
+  margin-top: 28px;
+}
+
+.lsg-hero__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ccc;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: width var(--lsg-hero-trans), border-radius var(--lsg-hero-trans), background var(--lsg-hero-trans);
+}
+
+.lsg-hero__dot.is-active {
+  width: 24px;
+  border-radius: 4px;
+  background: var(--lsg-slide-accent, #046bd2);
+}
+
+/* ============================================================
+   Image column
+   ============================================================ */
+.lsg-hero__image {
+  height: 520px;
+  overflow: hidden;
+}
+
+.lsg-hero__image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center center;
+  display: block;
+}
+
+/* ============================================================
+   Trust badge strip
+   ============================================================ */
+.lsg-hero__badges {
+  display: flex;
+  background: #fff;
+  border-top: 1px solid #e8e8e8;
+}
+
+.lsg-hero__badge {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 24px;
+  flex: 1;
+  border-right: 1px solid #e8e8e8;
+}
+
+.lsg-hero__badge:last-child {
+  border-right: none;
+}
+
+.lsg-hero__badge-icon {
+  font-size: 22px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.lsg-hero__badge-text strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin-bottom: 2px;
+}
+
+.lsg-hero__badge-text span {
+  font-size: 11px;
+  color: #888;
+}
+
+/* ============================================================
+   Feature strip (dark bar)
+   ============================================================ */
+.lsg-features {
+  background: #1a1a1a;
+  border-bottom: 3px solid var(--lsg-slide-accent, #046bd2);
+}
+
+.lsg-features__inner {
+  display: flex;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.lsg-feature {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 28px;
+  border-right: 1px solid rgba(255,255,255,.1);
+  color: #fff;
+  text-decoration: none;
+  transition: background var(--lsg-hero-trans);
+}
+
+.lsg-feature:hover {
+  background: rgba(255,255,255,.06);
+}
+
+.lsg-feature:last-child {
+  border-right: none;
+}
+
+.lsg-feature__icon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.lsg-feature__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 2px;
+}
+
+.lsg-feature__text {
+  font-size: 11px;
+  color: rgba(255,255,255,.5);
+}
+
+/* ============================================================
+   Tablet (900px)
+   ============================================================ */
+@media (max-width: 900px) {
+  .lsg-hero__inner {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+
+  .lsg-hero__image {
+    height: 300px;
+    order: -1;
+  }
+
+  .lsg-hero__content {
+    padding: 36px 28px;
+  }
+
+  .lsg-hero__desc {
+    max-width: 100%;
+  }
+
+  .lsg-hero__badges {
+    flex-wrap: wrap;
+  }
+
+  .lsg-hero__badge {
+    flex: 0 0 50%;
+    border-bottom: 1px solid #e8e8e8;
+  }
+
+  .lsg-features__inner {
+    flex-wrap: wrap;
+  }
+
+  .lsg-feature {
+    flex: 0 0 50%;
+  }
+}
+
+/* ============================================================
+   Mobile (480px)
+   ============================================================ */
+@media (max-width: 480px) {
+  .lsg-hero__content {
+    padding: 28px 20px;
+  }
+
+  .lsg-hero__image {
+    height: 240px;
+  }
+
+  .lsg-hero__badge {
+    flex: 0 0 100%;
+  }
+
+  .lsg-feature {
+    flex: 0 0 100%;
+  }
+
+  .lsg-hero__btn {
+    width: 100%;
+    text-align: center;
+  }
+}

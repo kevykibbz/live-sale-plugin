@@ -1,17 +1,31 @@
 <?php
 /**
  * Plugin Name: Live Sale Combined – Ably Real‑Time
- * Description: Live product grid with claiming, waitlist, pinning, real-time updates via Ably, and chat.
- * Version: 4.0
+ * Description: Live product grid with claiming, waitlist, pinning, real-time updates via Ably, chat, and video overlay.
+ * Version: 5.0
  * Requires Plugins: woocommerce
+ *
+ * SHORTCODES
+ *   [live_sale_grid]           — product grid
+ *   [live_sale_chat]           — standalone chat panel
+ *   [lsg_live_view video_url="…" chat_side="left" chat_width="30"]
+ *                              — video with chat overlay (TikTok / IG Live style)
+ *   [lsg_giveaway_timer product_id="X"]
+ *   [lsg_auction_widget product_id="X"]
+ *
+ * CONFIG (wp-config.php)
+ *   define( 'LSG_ABLY_API_KEY', 'your_key_here' );
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-// Prevent wptexturize from converting && to &#038;&#038; inside our shortcode JS
+// ============================================================
+// No-texturize filter (must run before shortcodes register)
+// ============================================================
 add_filter( 'no_texturize_shortcodes', function ( $shortcodes ) {
     $shortcodes[] = 'live_sale_grid';
     $shortcodes[] = 'live_sale_chat';
+    $shortcodes[] = 'lsg_live_view';
     return $shortcodes;
 } );
 
@@ -52,9 +66,111 @@ if ( ! $_lsg_ably_loaded || ! class_exists( 'Ably\AblyRest' ) ) {
 }
 
 // ============================================================
-// 0. Helpers
+// Load modules
 // ============================================================
+$_lsg_modules = [ 'helpers', 'product-data', 'admin', 'ajax', 'shortcodes', 'live-view', 'customizer' ];
+foreach ( $_lsg_modules as $_lsg_module ) {
+    require_once plugin_dir_path( __FILE__ ) . 'includes/' . $_lsg_module . '.php';
+}
+unset( $_lsg_modules, $_lsg_module );
 
+// Remove Botiga's footer copyright bar
+add_action( 'after_setup_theme', function () {
+    if ( class_exists( 'Botiga_Footer' ) ) {
+        remove_action( 'botiga_footer', [ Botiga_Footer::get_instance(), 'footer_markup' ] );
+    }
+}, 20 );
+
+// ============================================================
+// Hide page title (entry-header) on any page that uses [lsg_live_view]
+// Uses Botiga's own filter — avoids CSS flash entirely
+// ============================================================
+add_action( 'wp', function () {
+    global $post;
+    if ( ! $post || ! has_shortcode( $post->post_content, 'lsg_live_view' ) ) return;
+    add_filter( 'botiga_entry_header', '__return_false' );
+} );
+
+// ============================================================
+// Remove Shop page title + breadcrumb
+// Botiga reads these three theme_mods and does an early return
+// (no <header> rendered at all) when all three are falsy.
+// ============================================================
+add_filter( 'theme_mod_shop_page_title',       '__return_zero' );
+add_filter( 'theme_mod_shop_breadcrumbs',      '__return_zero' );
+add_filter( 'theme_mod_shop_page_description', '__return_zero' );
+
+// ============================================================
+// Disable regular WooCommerce Add to Cart for Live Sale products
+// These products can ONLY be claimed through the Live Sale grid
+// ============================================================
+add_filter( 'woocommerce_is_purchasable', function ( $purchasable, $product ) {
+    if ( ! $product ) return $purchasable;
+    if ( has_term( 'live-sale', 'product_cat', $product->get_id() ) ) {
+        return false;
+    }
+    return $purchasable;
+}, 10, 2 );
+
+// Hide short description for Live Sale products (contains claimed users list for grid only)
+add_filter( 'woocommerce_short_description', function ( $short_desc ) {
+    global $product;
+    if ( ! $product || ! is_singular( 'product' ) ) return $short_desc;
+    if ( has_term( 'live-sale', 'product_cat', $product->get_id() ) ) {
+        return '';
+    }
+    return $short_desc;
+} );
+
+// Show custom message on Live Sale product pages instead of add-to-cart button
+add_action( 'woocommerce_single_product_summary', function () {
+    global $product;
+    if ( ! $product || ! has_term( 'live-sale', 'product_cat', $product->get_id() ) ) return;
+    
+    echo '<div class="lsg-live-sale-notice" style="background: #f0f9ff; border-left: 4px solid #0284c7; padding: 16px; margin: 20px 0; border-radius: 4px;">';
+    echo '<p style="margin: 0 0 12px; font-weight: 600; color: #0c4a6e;">📺 This product is available through Live Sale only!</p>';
+    echo '<p style="margin: 0; color: #334155;">Visit the <a href="' . esc_url( home_url( '/live-sales/' ) ) . '" style="color: #0284c7; text-decoration: none; font-weight: 600;">Live Sales page</a> to claim, bid, or enter giveaways.</p>';
+    echo '</div>';
+}, 30 );
+
+// Enqueue hero CSS on front page (so body.home rules always apply)
+// Also register Ionicons v8 ESM web component (enqueued on demand by shortcodes)
+add_action( 'wp_enqueue_scripts', function () {
+    if ( is_front_page() ) {
+        wp_enqueue_style(
+            'lsg-hero',
+            plugin_dir_url( __FILE__ ) . 'css/livesale-hero.css',
+            [],
+            '1.0'
+        );
+    }
+
+    // Register Ionicons — shortcodes call wp_enqueue_script('ionicons-esm') to pull it in
+    wp_register_script(
+        'ionicons-esm',
+        'https://cdnjs.cloudflare.com/ajax/libs/ionicons/8.0.13/ionicons/ionicons.esm.min.js',
+        [],
+        null,
+        true
+    );
+} );
+
+// Swap WordPress's default <script> tag for Ionicons to the correct ESM module tag
+add_filter( 'script_loader_tag', function ( $tag, $handle ) {
+    if ( $handle !== 'ionicons-esm' ) {
+        return $tag;
+    }
+    $esm  = 'https://cdnjs.cloudflare.com/ajax/libs/ionicons/8.0.13/ionicons/ionicons.esm.min.js';
+    $cjs  = 'https://cdnjs.cloudflare.com/ajax/libs/ionicons/8.0.13/ionicons/p-BKJPfAGl.min.js';
+    return '<script type="module" crossorigin="anonymous" src="' . esc_url( $esm ) . '"></script>' . "\n"
+         . '<script nomodule crossorigin="anonymous" src="' . esc_url( $cjs ) . '"></script>' . "\n";
+}, 10, 2 );
+
+/* ---- legacy code below this line has been moved to includes/ ----
+   It is kept here temporarily for reference and will be removed
+   in the next release. Do NOT add new code below this line.
+   ------------------------------------------------------------------ */
+if ( false ) { // Never executes — IDE reference only
 function lsg_check_woocommerce() {
     if ( ! class_exists( 'WooCommerce' ) ) {
         add_action( 'admin_notices', function () {
@@ -154,12 +270,23 @@ function lsg_get_product_data( int $product_id ) : ?array {
         $image_url = wc_placeholder_img_src( 'woocommerce_thumbnail' );
     }
 
-    $is_giveaway        = (bool) get_post_meta( $product_id, 'lsg_is_giveaway',       true );
-    $giveaway_duration  = (int)  get_post_meta( $product_id, 'lsg_giveaway_duration', true );
-    $giveaway_end_time  = (int)  get_post_meta( $product_id, 'lsg_giveaway_end_time', true );
+    $is_giveaway        = (bool) get_post_meta( $product_id, 'lsg_is_giveaway',         true );
+    $giveaway_duration  = (int)  get_post_meta( $product_id, 'lsg_giveaway_duration',   true );
+    $giveaway_end_time  = (int)  get_post_meta( $product_id, 'lsg_giveaway_end_time',   true );
     $giveaway_entrants  = get_post_meta( $product_id, 'lsg_giveaway_entrants', true ) ?: [];
-    $giveaway_winner    = (string) get_post_meta( $product_id, 'lsg_giveaway_winner', true );
-    $giveaway_status    = (string) get_post_meta( $product_id, 'lsg_giveaway_status', true ) ?: 'idle';
+    $giveaway_winner    = (string) get_post_meta( $product_id, 'lsg_giveaway_winner',   true );
+    $giveaway_status    = (string) get_post_meta( $product_id, 'lsg_giveaway_status',   true ) ?: 'idle';
+    $giveaway_claimed_only = (bool) get_post_meta( $product_id, 'lsg_giveaway_claimed_only', true );
+
+    // Auction fields
+    $is_auction          = (bool)   get_post_meta( $product_id, 'lsg_is_auction',         true );
+    $auction_base_price  = (float)  get_post_meta( $product_id, 'lsg_auction_base_price', true );
+    $auction_duration    = (int)    get_post_meta( $product_id, 'lsg_auction_duration',   true );
+    $auction_status      = (string) get_post_meta( $product_id, 'lsg_auction_status',     true ) ?: 'idle';
+    $auction_end_time    = (int)    get_post_meta( $product_id, 'lsg_auction_end_time',   true );
+    $auction_current_bid = (float)  get_post_meta( $product_id, 'lsg_auction_current_bid', true );
+    $auction_current_bidder = (string) get_post_meta( $product_id, 'lsg_auction_current_bidder', true );
+    $auction_bids        = get_post_meta( $product_id, 'lsg_auction_bids', true ) ?: [];
 
     // Server-side auto-advance: if timer expired but still marked running, roll now
     // without making any Ably network call (no blocking, no sleep).
@@ -200,19 +327,32 @@ function lsg_get_product_data( int $product_id ) : ?array {
         'pinned'           => $pinned,
         'version'          => $version,
         'image_url'        => $image_url,
+        'is_logged_in'     => is_user_logged_in(),
+        'login_url'        => wp_login_url( get_permalink() ),
         'is_claimed'       => in_array( $username, $claimed_users, true ),
         'on_waitlist'      => in_array( $username, $waitlist,      true ),
         // Giveaway fields
-        'is_giveaway'      => $is_giveaway,
-        'giveaway_duration'=> $giveaway_duration,
-        'giveaway_end_time'=> $giveaway_end_time,
-        'giveaway_entrants'=> $giveaway_entrants,
-        'giveaway_winner'  => $giveaway_winner,
-        'giveaway_status'  => $giveaway_status,
-        'has_entered'      => in_array( $username, $giveaway_entrants, true ),
-        'is_giveaway_winner' => ( $is_giveaway && $giveaway_status === 'ended' && $giveaway_winner !== '' && $giveaway_winner === $username ),
-        'current_username' => $username,
-        'giveaway_order_id' => (int) get_post_meta( $product_id, 'lsg_giveaway_order_id', true ),
+        'is_giveaway'           => $is_giveaway,
+        'giveaway_duration'     => $giveaway_duration,
+        'giveaway_end_time'     => $giveaway_end_time,
+        'giveaway_entrants'     => $giveaway_entrants,
+        'giveaway_winner'       => $giveaway_winner,
+        'giveaway_status'       => $giveaway_status,
+        'giveaway_claimed_only' => $giveaway_claimed_only,
+        'has_entered'           => in_array( $username, $giveaway_entrants, true ),
+        'is_giveaway_winner'    => ( $is_giveaway && $giveaway_status === 'ended' && $giveaway_winner !== '' && $giveaway_winner === $username ),
+        'current_username'      => $username,
+        'giveaway_order_id'     => (int) get_post_meta( $product_id, 'lsg_giveaway_order_id', true ),
+        // Auction fields
+        'is_auction'            => $is_auction,
+        'auction_base_price'    => $auction_base_price,
+        'auction_duration'      => $auction_duration,
+        'auction_status'        => $auction_status,
+        'auction_end_time'      => $auction_end_time,
+        'auction_current_bid'   => $auction_current_bid,
+        'auction_current_bidder'=> $auction_current_bidder,
+        'auction_bids'          => $auction_bids,
+        'is_auction_winner'     => ( $is_auction && $auction_status === 'ended' && $auction_current_bidder !== '' && $auction_current_bidder === $username ),
     ];
 }
 
@@ -224,9 +364,62 @@ function lsg_render_product_card( array $d ) : string {
         ? '<span class="lsg-pinned-badge">📌 Pinned</span>'
         : '';
 
+    // ---- Auction card ----
+    if ( ! empty( $d['is_auction'] ) ) {
+        $status      = $d['auction_status'];
+        $base        = (float) $d['auction_base_price'];
+        $current_bid = (float) $d['auction_current_bid'];
+        $bidder      = esc_html( $d['auction_current_bidder'] );
+        $display_bid = $current_bid > 0 ? $current_bid : $base;
+        $bid_label   = $current_bid > 0 ? 'Current Bid' : 'Starting Bid';
+
+        $img_html = '<div class="lsg-card-img lsg-zoomable"><img src="' . esc_url( $d['image_url'] ) . '" alt="' . esc_attr( $d['name'] ) . '"><div class="lsg-zoom-overlay">🔍</div></div>';
+
+        if ( $status === 'ended' ) {
+            $is_winner = ! empty( $d['is_auction_winner'] );
+            $winner_banner = $is_winner
+                ? '<div class="lsg-giveaway-winner-banner lsg-winner-you">🏆 You won this auction!</div>'
+                : '<div class="lsg-auction-winner-banner">🔨 Winner: <strong>' . $bidder . '</strong> — ' . wc_price( $current_bid ) . '</div>';
+            $btn = '<button class="lsg-btn lsg-btn-waitlist-joined" disabled>Auction Ended</button>';
+            $timer_html = $winner_banner;
+        } elseif ( $status === 'running' ) {
+            $timer_html = '<div class="lsg-auction-timer" data-end="' . esc_attr( $d['auction_end_time'] ) . '" data-id="' . esc_attr( $d['id'] ) . '">'
+                . '<span class="lsg-timer-label">⏱ Ends in</span> <span class="lsg-auction-timer-count"></span>'
+                . '</div>';
+            if ( empty( $d['is_logged_in'] ) ) {
+                $btn = '<a href="' . esc_url( $d['login_url'] ) . '" class="lsg-btn lsg-btn-login">🔒 Login to Bid</a>';
+            } else {
+                $btn = '<div class="lsg-auction-bid-wrap">'
+                    . '<input type="number" class="lsg-bid-input" data-id="' . esc_attr( $d['id'] ) . '" placeholder="Your bid" step="0.01" min="' . esc_attr( $display_bid + 0.01 ) . '" style="width:100%;padding:8px;border:1.5px solid #e67e22;border-radius:6px;font-size:14px;box-sizing:border-box;margin-bottom:6px;">'
+                    . '<button class="lsg-btn lsg-btn-auction place-bid" data-id="' . esc_attr( $d['id'] ) . '">🔨 Place Bid</button>'
+                    . '</div>';
+            }
+        } else {
+            $timer_html = '<div class="lsg-auction-timer lsg-timer-idle">⏳ Auction Starting Soon</div>';
+            $btn = '<button class="lsg-btn lsg-btn-waitlist-joined" disabled>⏳ Starting Soon</button>';
+        }
+
+        return '<div id="product-' . esc_attr( $d['id'] ) . '" class="live-sale-card lsg-auction-card' . ( $d['pinned'] ? ' is-pinned' : '' ) . '" data-version="' . esc_attr( $d['version'] ) . '">'
+            . $pinned_badge
+            . '<span class="lsg-auction-badge">🔨 Auction</span>'
+            . $img_html
+            . '<div class="lsg-card-body">'
+            . '<h3 class="lsg-card-title"><span class="lsg-card-title-text">' . esc_html( $d['name'] ) . '</span></h3>'
+            . '<div class="lsg-card-sku">SKU: ' . esc_html( $d['sku'] ) . '</div>'
+            . '<div class="lsg-auction-bid-display"><span class="lsg-bid-label">' . esc_html( $bid_label ) . ':</span> <strong class="lsg-current-bid-val">' . wc_price( $display_bid ) . '</strong>'
+            . ( $bidder ? ' <span class="lsg-bidder-name">by ' . $bidder . '</span>' : '' ) . '</div>'
+            . $timer_html
+            . '<div class="lsg-card-actions">' . $btn . '</div>'
+            . '</div>'
+            . '</div>';
+    }
+
     // ---- Giveaway card ----
     if ( ! empty( $d['is_giveaway'] ) ) {
         $status = $d['giveaway_status'];
+        $claimed_only_badge = ! empty( $d['giveaway_claimed_only'] )
+            ? '<span class="lsg-claimed-only-badge">🔒 Claimants Only</span>'
+            : '';
 
         if ( $status === 'ended' ) {
             $winner    = esc_html( $d['giveaway_winner'] ?: 'No entrants' );
@@ -238,7 +431,6 @@ function lsg_render_product_card( array $d ) : string {
                     $order_url = esc_url( wc_get_account_endpoint_url( 'orders' ) );
                     $btn = '<a href="' . $order_url . '" class="lsg-btn lsg-btn-winner-cta">🎁 View Your Order #' . $order_id . '</a>';
                 } else {
-                    // Order not yet created (edge case: race with cron). Show encouraging message.
                     $btn = '<button class="lsg-btn lsg-btn-claimed" disabled>🎉 You Won! Check your email.</button>';
                 }
                 $timer_html = '<div class="lsg-giveaway-winner-banner lsg-winner-you">'
@@ -249,10 +441,13 @@ function lsg_render_product_card( array $d ) : string {
                 $timer_html = '<div class="lsg-giveaway-winner-banner">🏆 Winner: <strong>' . $winner . '</strong></div>';
             }
         } elseif ( $status === 'running' ) {
-            $seconds_left = max( 0, $d['giveaway_end_time'] - time() );
-            $btn = $d['has_entered']
-                ? '<button class="lsg-btn lsg-btn-claimed" disabled>✓ Entered</button>'
-                : '<button class="lsg-btn lsg-btn-giveaway enter-giveaway" data-id="' . esc_attr( $d['id'] ) . '">🎟 Enter Giveaway</button>';
+            if ( empty( $d['is_logged_in'] ) ) {
+                $btn = '<a href="' . esc_url( $d['login_url'] ) . '" class="lsg-btn lsg-btn-login">🔒 Login to Enter</a>';
+            } elseif ( $d['has_entered'] ) {
+                $btn = '<button class="lsg-btn lsg-btn-claimed" disabled>✓ Entered</button>';
+            } else {
+                $btn = '<button class="lsg-btn lsg-btn-giveaway enter-giveaway" data-id="' . esc_attr( $d['id'] ) . '">🎟 Enter Giveaway</button>';
+            }
             $timer_html = '<div class="lsg-giveaway-timer" data-end="' . esc_attr( $d['giveaway_end_time'] ) . '" data-id="' . esc_attr( $d['id'] ) . '">'
                 . '<span class="lsg-timer-label">⏱ Ends in</span> <span class="lsg-timer-count"></span>'
                 . '</div>';
@@ -262,17 +457,18 @@ function lsg_render_product_card( array $d ) : string {
             $timer_html = '<div class="lsg-giveaway-timer lsg-timer-idle">⏳ Giveaway Starting Soon</div>';
         }
 
-        $img_html = '<div class="lsg-card-img"><img src="' . esc_url( $d['image_url'] ) . '" alt="' . esc_attr( $d['name'] ) . '"></div>';
+        $img_html = '<div class="lsg-card-img lsg-zoomable"><img src="' . esc_url( $d['image_url'] ) . '" alt="' . esc_attr( $d['name'] ) . '"><div class="lsg-zoom-overlay">🔍</div></div>';
         $entrants_count = count( $d['giveaway_entrants'] );
 
         return '<div id="product-' . esc_attr( $d['id'] ) . '" class="live-sale-card lsg-giveaway-card' . ( $d['pinned'] ? ' is-pinned' : '' ) . '" data-version="' . esc_attr( $d['version'] ) . '">'
             . $pinned_badge
             . '<span class="lsg-giveaway-badge">🎁 Giveaway</span>'
+            . $claimed_only_badge
             . $img_html
             . '<div class="lsg-card-body">'
-            . '<h3 class="lsg-card-title">' . esc_html( $d['name'] ) . '</h3>'
+            . '<h3 class="lsg-card-title"><span class="lsg-card-title-text">' . esc_html( $d['name'] ) . '</span></h3>'
             . '<div class="lsg-card-sku">SKU: ' . esc_html( $d['sku'] ) . '</div>'
-            . '<div class="lsg-card-price">' . wc_price( $d['price'] ) . '</div>'
+            . '<div class="lsg-card-price"><span class="lsg-price-text">' . wc_price( $d['price'] ) . '</span></div>'
             . '<div class="lsg-giveaway-entrants">👥 ' . esc_html( $entrants_count ) . ' entered</div>'
             . $timer_html
             . '<div class="lsg-card-actions">' . $btn . '</div>'
@@ -281,7 +477,9 @@ function lsg_render_product_card( array $d ) : string {
     }
 
     // ---- Regular claim card ----
-    if ( $d['is_claimed'] ) {
+    if ( empty( $d['is_logged_in'] ) ) {
+        $btn = '<a href="' . esc_url( $d['login_url'] ) . '" class="lsg-btn lsg-btn-login">🔒 Login to Claim</a>';
+    } elseif ( $d['is_claimed'] ) {
         $btn = '<button class="lsg-btn lsg-btn-claimed" disabled>✓ Claimed</button>';
     } elseif ( $d['available_stock'] > 0 ) {
         $btn = '<button class="lsg-btn lsg-btn-claim claim-now" data-id="' . esc_attr( $d['id'] ) . '">Claim Now</button>';
@@ -291,15 +489,15 @@ function lsg_render_product_card( array $d ) : string {
         $btn = '<button class="lsg-btn lsg-btn-waitlist join-waitlist" data-id="' . esc_attr( $d['id'] ) . '">Join Waitlist</button>';
     }
 
-    $img_html = '<div class="lsg-card-img"><img src="' . esc_url( $d['image_url'] ) . '" alt="' . esc_attr( $d['name'] ) . '"></div>';
+    $img_html = '<div class="lsg-card-img lsg-zoomable"><img src="' . esc_url( $d['image_url'] ) . '" alt="' . esc_attr( $d['name'] ) . '"><div class="lsg-zoom-overlay">🔍</div></div>';
 
     return '<div id="product-' . esc_attr( $d['id'] ) . '" class="live-sale-card' . ( $d['pinned'] ? ' is-pinned' : '' ) . '" data-version="' . esc_attr( $d['version'] ) . '">'
         . $pinned_badge
         . $img_html
         . '<div class="lsg-card-body">'
-        . '<h3 class="lsg-card-title">' . esc_html( $d['name'] ) . '</h3>'
+        . '<h3 class="lsg-card-title"><span class="lsg-card-title-text">' . esc_html( $d['name'] ) . '</span></h3>'
         . '<div class="lsg-card-sku">SKU: ' . esc_html( $d['sku'] ) . '</div>'
-        . '<div class="lsg-card-price">' . wc_price( $d['price'] ) . '</div>'
+        . '<div class="lsg-card-price"><span class="lsg-price-text">' . wc_price( $d['price'] ) . '</span></div>'
         . '<div class="lsg-card-stock">Available: <span class="stock-count">' . esc_html( $d['available_stock'] ) . '</span></div>'
         . '<div class="lsg-card-actions">' . $btn . '</div>'
         . '</div>'
@@ -362,11 +560,42 @@ function lsg_render_admin_row( int $pid ) : string {
         }
     }
 
-    return '<tr id="product-row-' . $pid . '" class="' . ( $pinned ? 'lsg-row-pinned' : '' ) . ( $is_giveaway ? ' lsg-row-giveaway' : '' ) . '">'
-        . '<td>' . $thumb_html . '<strong class="product-name">' . esc_html( $product->get_name() ) . '</strong>'
+    $is_auction      = (bool) get_post_meta( $pid, 'lsg_is_auction', true );
+    $auction_status  = (string) get_post_meta( $pid, 'lsg_auction_status', true ) ?: 'idle';
+    $auction_end     = (int) get_post_meta( $pid, 'lsg_auction_end_time', true );
+    $auction_dur     = (int) get_post_meta( $pid, 'lsg_auction_duration', true );
+    $auction_base    = (float) get_post_meta( $pid, 'lsg_auction_base_price', true );
+    $current_bid     = (float) get_post_meta( $pid, 'lsg_auction_current_bid', true );
+    $current_bidder  = (string) get_post_meta( $pid, 'lsg_auction_current_bidder', true );
+
+    $auction_html = '';
+    if ( $is_auction ) {
+        if ( $auction_status === 'idle' ) {
+            $auction_html = '<div style="margin-top:6px;">'
+                . '<button class="button button-primary button-small lsg-start-auction-btn" data-id="' . $pid . '" data-duration="' . esc_attr( $auction_dur ) . '">▶ Start Auction (' . esc_html( $auction_dur ) . 'min)</button>'
+                . '</div>';
+        } elseif ( $auction_status === 'running' ) {
+            $auction_html = '<div style="margin-top:6px;">'
+                . '<span class="lsg-admin-auction-timer" data-end="' . esc_attr( $auction_end ) . '" style="font-weight:700;color:#e67e22;font-size:13px;display:block;margin-bottom:4px;"></span>'
+                . 'Current bid: <strong>' . wc_price( $current_bid ?: $auction_base ) . '</strong>'
+                . ( $current_bidder ? ' by <em>' . esc_html( $current_bidder ) . '</em>' : ' (base)' )
+                . '<br><button class="button button-small lsg-end-auction-btn" data-id="' . $pid . '" style="margin-top:4px;">🔨 End Auction</button>'
+                . '</div>';
+        } elseif ( $auction_status === 'ended' ) {
+            $auction_html = '<div style="margin-top:6px;background:#fef5e7;border-radius:4px;padding:4px 8px;font-size:12px;">'
+                . '🔨 <strong>Winner:</strong> ' . ( $current_bidder ? esc_html( $current_bidder ) . ' — ' . wc_price( $current_bid ) : '<em>No bids</em>' )
+                . '</div>';
+        }
+    }
+
+    return '<tr id="product-row-' . $pid . '" class="' . ( $pinned ? 'lsg-row-pinned' : '' ) . ( $is_giveaway ? ' lsg-row-giveaway' : '' ) . ( $is_auction ? ' lsg-row-auction' : '' ) . '">'
+        . '<td>' . $thumb_html
+        . '<input type="text" class="name_admin" data-id="' . $pid . '" value="' . esc_attr( $product->get_name() ) . '" style="width:160px;font-weight:700;color:#00483e;">'
         . ( $is_giveaway ? ' <span style="background:#8e44ad;color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;">🎁 Giveaway</span>' : '' )
+        . ( $is_auction  ? ' <span style="background:#e67e22;color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;">🔨 Auction</span>' : '' )
         . '<br><code>' . esc_html( $product->get_sku() ) . '</code>'
         . $giveaway_html
+        . $auction_html
         . '</td>'
         . '<td><input type="number" step="0.01" class="price_admin" data-id="' . $pid . '" value="' . esc_attr( $product->get_price() ) . '" style="width:80px;"></td>'
         . '<td><input type="number" class="stock_admin" data-id="' . $pid . '" value="' . esc_attr( $total_stock ) . '" style="width:70px;"></td>'
@@ -519,8 +748,20 @@ function lsg_admin_products_tab() {
                     <input type="checkbox" name="is_giveaway" id="lsg_is_giveaway" value="1" style="width:auto;">
                     <span>🎁 This is a Giveaway</span>
                 </label>
-                <div id="lsg_giveaway_duration_wrap" style="display:none;">
+                <div id="lsg_giveaway_duration_wrap" style="display:none;background:#f9f2ff;border-radius:8px;padding:12px;margin-top:-5px;">
                     <label>Timer Duration (minutes) *<br><input type="number" name="giveaway_duration" min="1" value="5" style="width:100px;"></label>
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:10px;">
+                        <input type="checkbox" name="giveaway_claimed_only" value="1" style="width:auto;">
+                        <span style="font-size:13px;">Claimed users only can enter</span>
+                    </label>
+                </div>
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                    <input type="checkbox" name="is_auction" id="lsg_is_auction" value="1" style="width:auto;">
+                    <span>🔨 This is an Auction</span>
+                </label>
+                <div id="lsg_auction_wrap" style="display:none;background:#fef5e7;border-radius:8px;padding:12px;margin-top:-5px;">
+                    <label>Base Price *<br><input type="number" name="auction_base_price" step="0.01" min="0" value="0" style="width:120px;"></label>
+                    <label style="margin-top:10px;display:block;">Auction Duration (minutes) *<br><input type="number" name="auction_duration" min="1" value="5" style="width:100px;"></label>
                 </div>
                 <button type="submit" class="button button-primary">Create Product</button>
             </form>
@@ -580,6 +821,7 @@ function lsg_admin_products_tab() {
             }, 500);
         }
 
+        $(document).on('blur', '.name_admin',      function(){ sendUpdate($(this), 'lsg_update_product_name',   $(this).val()); });
         $(document).on('blur', '.price_admin',     function(){ sendUpdate($(this), 'lsg_update_price',     parseFloat($(this).val())); });
         $(document).on('blur', '.stock_admin',     function(){ sendUpdate($(this), 'lsg_update_total_stock',  parseInt($(this).val())); });
         $(document).on('blur', '.available_admin', function(){ sendUpdate($(this), 'lsg_update_available_stock', parseInt($(this).val())); });
@@ -641,7 +883,69 @@ function lsg_admin_products_tab() {
         // Toggle giveaway duration field
         $('#lsg_is_giveaway').on('change', function(){
             $('#lsg_giveaway_duration_wrap').toggle(this.checked);
+            if (this.checked) $('#lsg_is_auction').prop('checked', false).trigger('change');
         });
+
+        // Toggle auction field
+        $('#lsg_is_auction').on('change', function(){
+            $('#lsg_auction_wrap').toggle(this.checked);
+            if (this.checked) $('#lsg_is_giveaway').prop('checked', false).trigger('change');
+        });
+
+        // Admin: Start Auction
+        $(document).on('click', '.lsg-start-auction-btn', function(){
+            var btn = $(this);
+            var pid = btn.data('id');
+            var dur = parseInt(btn.data('duration'), 10);
+            if (!confirm('Start ' + dur + '-minute auction for this product?')) return;
+            btn.prop('disabled', true).text('Starting…');
+            $.post(ajaxurl, {
+                action: 'lsg_start_auction', product_id: pid, duration: dur, _ajax_nonce: saveNonce
+            }, function(r){
+                if (r.success && r.data.html) {
+                    $('#product-row-' + pid).replaceWith(r.data.html);
+                } else {
+                    alert('Could not start auction.');
+                    btn.prop('disabled', false).text('▶ Start Auction');
+                }
+            });
+        });
+
+        // Admin: End Auction
+        $(document).on('click', '.lsg-end-auction-btn', function(){
+            var btn = $(this);
+            var pid = btn.data('id');
+            if (!confirm('End auction and declare winner now?')) return;
+            btn.prop('disabled', true).text('Ending…');
+            $.post(ajaxurl, {
+                action: 'lsg_end_auction', product_id: pid, _ajax_nonce: saveNonce
+            }, function(r){
+                if (r.success) {
+                    alert('🔨 Winner: ' + r.data.winner);
+                    if (r.data.html) $('#product-row-' + pid).replaceWith(r.data.html);
+                } else {
+                    alert(r.data || 'Could not end auction.');
+                    btn.prop('disabled', false).text('🔨 End Auction');
+                }
+            });
+        });
+
+        // Admin auction countdown timers
+        function updateAuctionAdminTimers() {
+            var now = Math.floor(Date.now() / 1000);
+            $('.lsg-admin-auction-timer[data-end]').each(function(){
+                var el   = $(this);
+                var end  = parseInt(el.data('end'), 10);
+                var left = end - now;
+                if (left <= 0) {
+                    el.text('⏰ EXPIRED');
+                } else {
+                    var m = Math.floor(left/60), s = left % 60;
+                    el.text('⏱ ' + (m<10?'0':'')+m + ':' + (s<10?'0':'')+s + ' remaining');
+                }
+            });
+        }
+        setInterval(updateAuctionAdminTimers, 1000);
 
         // Admin: Start Giveaway
         $(document).on('click', '.lsg-start-giveaway-btn', function(){
@@ -697,6 +1001,32 @@ function lsg_admin_products_tab() {
             });
         }
         setInterval(updateAdminTimers, 1000);
+
+        // Real-time admin row updates via Ably
+        (function(){
+            var ablyKey     = '<?php echo esc_js( ABLY_API_KEY ); ?>';
+            var ablyChannel = '<?php echo esc_js( ABLY_PRODUCT_CHANNEL ); ?>';
+            var rowNonce    = '<?php echo wp_create_nonce( 'live_sale_update' ); ?>';
+            if ( ! ablyKey ) return;
+            function refreshAdminRow(pid) {
+                $.post(ajaxurl, { action: 'lsg_refresh_admin_row', product_id: pid, _ajax_nonce: rowNonce }, function(r){
+                    if (r.success && r.data && r.data.html) $('#product-row-' + pid).replaceWith(r.data.html);
+                });
+            }
+            var s = document.createElement('script');
+            s.src = 'https://cdn.ably.com/lib/ably.min-1.js';
+            s.async = true;
+            s.onload = function() {
+                try {
+                    var ably = new Ably.Realtime(ablyKey);
+                    var ch   = ably.channels.get(ablyChannel);
+                    ch.subscribe('product-updated',  function(m){ if (m.data && m.data.product_id) refreshAdminRow(m.data.product_id); });
+                    ch.subscribe('giveaway-started', function(m){ if (m.data && m.data.product_id) refreshAdminRow(m.data.product_id); });
+                    ch.subscribe('giveaway-winner',  function(m){ if (m.data && m.data.product_id) refreshAdminRow(m.data.product_id); });
+                } catch(e) { console.warn('[LiveSale Admin] Ably init failed:', e.message); }
+            };
+            document.head.appendChild(s);
+        })();
 
         // Media uploader
         var mediaFrame;
@@ -887,6 +1217,7 @@ function lsg_admin_waitlist_tab() {
 function lsg_render_admin_summary() {
     $cat_id = lsg_get_live_sale_category();
     $total_products = 0; $total_stock = 0; $available_stock_sum = 0; $total_claims = 0; $total_waitlisted = 0;
+    $total_claimed_value = 0.0;
 
     if ( $cat_id ) {
         $ids = get_posts( [ 'post_type' => 'product', 'posts_per_page' => -1,
@@ -897,22 +1228,26 @@ function lsg_render_admin_summary() {
             if ( ! $product ) continue;
             $total_stock        += max( 0, (int) $product->get_stock_quantity() );
             $available_stock_sum += max( 0, (int) get_post_meta( $pid, 'available_stock', true ) );
-            $total_claims       += count( get_post_meta( $pid, 'claimed_users',  true ) ?: [] );
-            $total_waitlisted   += count( get_post_meta( $pid, 'lsg_waitlist',   true ) ?: [] );
+            $claimed             = get_post_meta( $pid, 'claimed_users', true ) ?: [];
+            $claim_count         = count( $claimed );
+            $total_claims       += $claim_count;
+            $total_waitlisted   += count( get_post_meta( $pid, 'lsg_waitlist', true ) ?: [] );
+            $total_claimed_value += (float) $product->get_price() * $claim_count;
         }
     }
     ?>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin:20px 0;">
         <?php foreach ( [
-            [ '📦', $total_products,       'Products' ],
-            [ '📊', $total_stock,           'Total Stock' ],
-            [ '✅', $available_stock_sum,   'Available' ],
-            [ '👥', $total_claims,          'Claims' ],
-            [ '⏳', $total_waitlisted,      'Waitlisted' ],
+            [ '📦', $total_products,                                          'Products' ],
+            [ '📊', $total_stock,                                              'Total Stock' ],
+            [ '✅', $available_stock_sum,                                      'Available' ],
+            [ '👥', $total_claims,                                             'Claims' ],
+            [ '⏳', $total_waitlisted,                                         'Waitlisted' ],
+            [ '💰', strip_tags( wc_price( $total_claimed_value ) ),           'Total Claimed Value' ],
         ] as $card ) : ?>
         <div style="background:#fff;border-radius:10px;padding:18px;box-shadow:0 2px 6px rgba(0,0,0,.07);display:flex;align-items:center;gap:12px;">
             <span style="font-size:28px;"><?php echo $card[0]; ?></span>
-            <div><div style="font-size:22px;font-weight:700;color:#00483e;"><?php echo esc_html( $card[1] ); ?></div><div style="color:#777;font-size:12px;"><?php echo esc_html( $card[2] ); ?></div></div>
+            <div><div style="font-size:<?php echo $card[2] === 'Total Claimed Value' ? '16px' : '22px'; ?>;font-weight:700;color:#00483e;"><?php echo esc_html( $card[1] ); ?></div><div style="color:#777;font-size:12px;"><?php echo esc_html( $card[2] ); ?></div></div>
         </div>
         <?php endforeach; ?>
     </div>
@@ -960,12 +1295,27 @@ function lsg_handle_create_product() : bool {
         // Giveaway meta
         $is_giveaway      = ! empty( $_POST['is_giveaway'] ) ? 1 : 0;
         $giveaway_duration= max( 1, (int) ( $_POST['giveaway_duration'] ?? 5 ) );
-        update_post_meta( $pid, 'lsg_is_giveaway',       $is_giveaway );
-        update_post_meta( $pid, 'lsg_giveaway_duration', $giveaway_duration );
-        update_post_meta( $pid, 'lsg_giveaway_status',   'idle' );
-        update_post_meta( $pid, 'lsg_giveaway_end_time', 0 );
-        update_post_meta( $pid, 'lsg_giveaway_entrants', [] );
-        update_post_meta( $pid, 'lsg_giveaway_winner',   '' );
+        $giveaway_claimed_only = ! empty( $_POST['giveaway_claimed_only'] ) ? 1 : 0;
+        update_post_meta( $pid, 'lsg_is_giveaway',             $is_giveaway );
+        update_post_meta( $pid, 'lsg_giveaway_duration',       $giveaway_duration );
+        update_post_meta( $pid, 'lsg_giveaway_claimed_only',   $giveaway_claimed_only );
+        update_post_meta( $pid, 'lsg_giveaway_status',         'idle' );
+        update_post_meta( $pid, 'lsg_giveaway_end_time',       0 );
+        update_post_meta( $pid, 'lsg_giveaway_entrants',       [] );
+        update_post_meta( $pid, 'lsg_giveaway_winner',         '' );
+
+        // Auction meta
+        $is_auction        = ! empty( $_POST['is_auction'] ) ? 1 : 0;
+        $auction_base      = max( 0, (float) ( $_POST['auction_base_price'] ?? 0 ) );
+        $auction_duration  = max( 1, (int) ( $_POST['auction_duration'] ?? 5 ) );
+        update_post_meta( $pid, 'lsg_is_auction',          $is_auction );
+        update_post_meta( $pid, 'lsg_auction_base_price',  $auction_base );
+        update_post_meta( $pid, 'lsg_auction_duration',    $auction_duration );
+        update_post_meta( $pid, 'lsg_auction_status',      'idle' );
+        update_post_meta( $pid, 'lsg_auction_end_time',    0 );
+        update_post_meta( $pid, 'lsg_auction_current_bid', 0 );
+        update_post_meta( $pid, 'lsg_auction_current_bidder', '' );
+        update_post_meta( $pid, 'lsg_auction_bids',        [] );
         wp_set_object_terms( $pid, [ $cat_id ], 'product_cat' );
         if ( $image_id ) set_post_thumbnail( $pid, $image_id );
 
@@ -998,7 +1348,7 @@ add_action( 'set_object_terms', function( $object_id, $terms, $tt_ids, $taxonomy
 }, 10, 4 );
 
 // ============================================================
-// 3. Frontend Shortcode  [live_sale_grid]
+// 4. Frontend Shortcode  [live_sale_grid]
 // ============================================================
 add_shortcode( 'live_sale_grid', function () {
     if ( ! is_user_logged_in() ) {
@@ -1013,38 +1363,66 @@ add_shortcode( 'live_sale_grid', function () {
     </div>
 
     <style>
-        /* Stretch grid to full content area */
+        /* Break out of the theme's constrained/has-global-padding container
+           so the grid fills the full viewport width */
         #lsg-grid-wrap {
-            width: 100%;
-            padding: 20px 0;
+            width: 100vw;
+            margin-left: calc(50% - 50vw);
+            margin-right: calc(50% - 50vw);
+            padding: 20px 24px;
             box-sizing: border-box;
         }
         #lsg-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-            gap: 24px;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            max-width: 1600px;
+            margin: 0 auto;
         }
-        @media (max-width: 600px) {
-            #lsg-grid { grid-template-columns: 1fr 1fr; gap: 12px; }
+        @media (max-width: 900px) {
+            #lsg-grid { grid-template-columns: repeat(2, 1fr); gap: 14px; }
         }
-        @media (max-width: 400px) {
-            #lsg-grid { grid-template-columns: 1fr; }
+        @media (max-width: 500px) {
+            #lsg-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+            #lsg-grid-wrap { padding: 12px; }
         }
         .live-sale-card { border:1px solid #e0e0e0; border-radius:12px; overflow:hidden; background:#fff;
             box-shadow:0 2px 6px rgba(0,0,0,.06); transition:transform .2s,box-shadow .2s; position:relative; }
         .live-sale-card:hover { transform:translateY(-3px); box-shadow:0 6px 16px rgba(0,0,0,.12); }
         .live-sale-card.is-pinned { border-color:#f5a623; box-shadow:0 0 0 2px #f5a623, 0 4px 12px rgba(0,0,0,.08); }
         .lsg-pinned-badge { position:absolute; top:8px; left:8px; background:#f5a623; color:#fff;
-            font-size:11px; font-weight:700; padding:3px 8px; border-radius:20px; z-index:1; }
-        .lsg-card-img { width:100%; aspect-ratio:1; overflow:hidden; background:#f5f5f5; }
-        .lsg-card-img img { width:100%; height:100%; object-fit:cover; display:block; }
-        .lsg-card-body { padding:14px; }
-        .lsg-card-title { margin:0 0 4px; font-size:16px; font-weight:700; color:#00483e; }
+            font-size:11px; font-weight:700; padding:3px 8px; border-radius:20px; z-index:2; }
+
+        /* Image zoom */
+        .lsg-card-img { width:100%; aspect-ratio:1; overflow:hidden; background:#f5f5f5; position:relative; cursor:zoom-in; }
+        .lsg-card-img img { width:100%; height:100%; object-fit:cover; display:block; transition:transform .3s ease; }
+        .lsg-card-img:hover img { transform:scale(1.07); }
+        .lsg-zoom-overlay { position:absolute; bottom:6px; right:8px; background:rgba(0,0,0,.45); color:#fff;
+            border-radius:50%; width:28px; height:28px; display:flex; align-items:center; justify-content:center;
+            font-size:14px; opacity:0; transition:opacity .2s; pointer-events:none; }
+        .lsg-card-img:hover .lsg-zoom-overlay { opacity:1; }
+
+        /* Lightbox */
+        #lsg-lightbox { display:none; position:fixed; inset:0; background:rgba(0,0,0,.85); z-index:99999;
+            justify-content:center; align-items:center; }
+        #lsg-lightbox.active { display:flex; }
+        #lsg-lightbox img { max-width:90vw; max-height:90vh; border-radius:8px; object-fit:contain;
+            box-shadow:0 8px 40px rgba(0,0,0,.6); }
+        #lsg-lightbox-close { position:absolute; top:20px; right:28px; color:#fff; font-size:36px;
+            cursor:pointer; line-height:1; background:none; border:none; }
+
+        .lsg-card-body { padding:12px; }
+        .lsg-card-title { margin:0 0 4px; font-size:15px; font-weight:700; }
+        /* Semi-transparent text overlay on card title */
+        .lsg-card-title-text { display:inline-block; color:#fff; background:rgba(0,72,62,.82);
+            padding:2px 7px; border-radius:4px; line-height:1.35; }
         .lsg-card-sku { font-size:11px; color:#999; background:#f5f5f5; display:inline-block;
-            padding:2px 7px; border-radius:4px; margin-bottom:8px; font-family:monospace; }
-        .lsg-card-price { font-size:22px; font-weight:700; color:#00483e; margin:6px 0; }
+            padding:2px 7px; border-radius:4px; margin-bottom:6px; font-family:monospace; }
+        .lsg-card-price { font-size:20px; font-weight:700; margin:4px 0; }
+        .lsg-price-text { display:inline-block; color:#fff; background:rgba(0,72,62,.82);
+            padding:2px 8px; border-radius:4px; }
         .lsg-card-stock { font-size:13px; color:#555; margin-bottom:10px; }
-        .lsg-btn { width:100%; padding:10px; border:none; border-radius:6px; font-size:14px;
+        .lsg-btn { width:100%; padding:10px; border:none; border-radius:6px; font-size:13px;
             font-weight:600; cursor:pointer; transition:background .2s,transform .1s; }
         .lsg-btn:active { transform:scale(.98); }
         .lsg-btn-claim { background:#27ae60; color:#fff; }
@@ -1064,20 +1442,39 @@ add_shortcode( 'live_sale_grid', function () {
         .lsg-btn-giveaway:hover { background:#7d3c98; }
         .lsg-giveaway-card { border-color:#8e44ad !important; }
         .lsg-giveaway-badge { position:absolute; top:8px; right:8px; background:#8e44ad; color:#fff;
-            font-size:11px; font-weight:700; padding:3px 8px; border-radius:20px; z-index:1; }
+            font-size:11px; font-weight:700; padding:3px 8px; border-radius:20px; z-index:2; }
+        .lsg-claimed-only-badge { position:absolute; top:34px; right:8px; background:#c0392b; color:#fff;
+            font-size:10px; font-weight:700; padding:2px 6px; border-radius:20px; z-index:2; }
         .lsg-giveaway-timer { font-size:13px; font-weight:600; color:#8e44ad; margin:6px 0 10px;
-            background:#f5eef8; padding:6px 10px; border-radius:6px; text-align:center; }
-        .lsg-timer-idle { color:#999; background:#f5f5f5; }
+            background:rgba(142,68,173,.12); padding:6px 10px; border-radius:6px; text-align:center; }
+        .lsg-timer-idle { color:#999; background:rgba(127,140,141,.1); }
         .lsg-timer-count { font-size:20px; font-weight:800; display:inline-block; min-width:60px; letter-spacing:1px; }
         .lsg-giveaway-entrants { font-size:12px; color:#777; margin-bottom:4px; }
-        .lsg-giveaway-winner-banner { font-size:13px; color:#b7950b; background:#fef9e7;
-            border:1px solid #f9e79f; padding:6px 10px; border-radius:6px; margin:6px 0; text-align:center; }
-        .lsg-winner-you { color:#1a5c38; background:#d4edda; border-color:#c3e6cb; }
+        .lsg-giveaway-winner-banner { font-size:13px; color:#b7950b; background:rgba(253,243,147,.6);
+            border:1px solid #f9e79f; padding:6px 10px; border-radius:6px; margin:6px 0; text-align:center; backdrop-filter:blur(2px); }
+        .lsg-winner-you { color:#1a5c38; background:rgba(212,237,218,.75); border-color:#c3e6cb; }
         .lsg-btn-winner-cta { display:block; background:#27ae60; color:#fff !important; text-decoration:none !important;
             text-align:center; padding:10px 14px; border-radius:8px; font-weight:700; font-size:14px;
             animation:lsg-pulse 1.8s ease-in-out infinite; }
         .lsg-btn-winner-cta:hover { background:#1e8449; }
         @keyframes lsg-pulse { 0%,100%{box-shadow:0 0 0 0 rgba(39,174,96,.5)} 50%{box-shadow:0 0 0 8px rgba(39,174,96,0)} }
+
+        /* ---- Auction ---- */
+        .lsg-auction-card { border-color:#e67e22 !important; }
+        .lsg-auction-badge { position:absolute; top:8px; right:8px; background:#e67e22; color:#fff;
+            font-size:11px; font-weight:700; padding:3px 8px; border-radius:20px; z-index:2; }
+        .lsg-auction-timer { font-size:13px; font-weight:600; color:#e67e22; margin:6px 0 10px;
+            background:rgba(230,126,34,.1); padding:6px 10px; border-radius:6px; text-align:center; }
+        .lsg-auction-timer-count { font-size:20px; font-weight:800; display:inline-block; min-width:60px; }
+        .lsg-auction-bid-display { font-size:14px; margin:6px 0; }
+        .lsg-bid-label { color:#777; font-size:12px; }
+        .lsg-current-bid-val { color:#e67e22; font-size:18px; }
+        .lsg-bidder-name { font-size:12px; color:#999; }
+        .lsg-auction-winner-banner { font-size:13px; color:#856404; background:rgba(255,243,205,.7);
+            border:1px solid #ffc107; padding:6px 10px; border-radius:6px; margin:6px 0; text-align:center; }
+        .lsg-btn-auction { background:#e67e22; color:#fff; }
+        .lsg-btn-auction:hover { background:#ca6f1e; }
+        .lsg-auction-bid-wrap { display:flex; flex-direction:column; gap:6px; }
 
         /* Skeleton loader */
         .lsg-skeleton { border:1px solid #e8e8e8; border-radius:12px; overflow:hidden;
@@ -1101,13 +1498,16 @@ add_shortcode( 'live_sale_grid', function () {
             animation: lsg-shimmer 1.4s infinite linear;
         }
     </style>
+
+    <!-- Lightbox -->
+    <div id="lsg-lightbox"><button id="lsg-lightbox-close">✕</button><img id="lsg-lightbox-img" src="" alt=""></div>
     <?php
     // Enqueue the grid JS — completely outside shortcode HTML so wptexturize never touches it
     wp_enqueue_script(
         'lsg-grid',
-        plugins_url( 'livesale-grid.js', __FILE__ ),
+        plugins_url( 'js/livesale-grid.js', __FILE__ ),
         [ 'jquery' ],
-        filemtime( plugin_dir_path( __FILE__ ) . 'livesale-grid.js' ),
+        filemtime( plugin_dir_path( __FILE__ ) . 'js/livesale-grid.js' ),
         true
     );
     wp_localize_script( 'lsg-grid', 'lsgGrid', [
@@ -1119,8 +1519,256 @@ add_shortcode( 'live_sale_grid', function () {
             $u = wp_get_current_user();
             return $u->ID ? ( $u->display_name ?: $u->user_login ) : '';
         } )(),
+        'init_version' => (int) get_option( 'lsg_global_version', 0 ),
     ] );
 
+    // Inline lightbox + auction bid JS for front-end grid
+    add_action( 'wp_footer', function() { static $done = false; if ( $done ) return; $done = true; ?>
+    <script>
+    jQuery(function($){
+        // Lightbox
+        $(document).on('click', '.lsg-zoomable', function(e){
+            if ( $(e.target).is('button,a,input') ) return;
+            var src = $(this).find('img').attr('src');
+            if (!src) return;
+            $('#lsg-lightbox-img').attr('src', src);
+            $('#lsg-lightbox').addClass('active');
+        });
+        $(document).on('click', '#lsg-lightbox-close, #lsg-lightbox', function(e){
+            if ( e.target === this ) $('#lsg-lightbox').removeClass('active');
+        });
+        $('#lsg-lightbox-close').on('click', function(){ $('#lsg-lightbox').removeClass('active'); });
+        $(document).on('keydown', function(e){ if(e.key==='Escape') $('#lsg-lightbox').removeClass('active'); });
+
+        // Auction bid
+        $(document).on('click', '.place-bid', function(){
+            var btn   = $(this);
+            var pid   = btn.data('id');
+            var input = $('.lsg-bid-input[data-id="'+pid+'"]');
+            var amount = parseFloat(input.val());
+            if (!amount || isNaN(amount) || amount <= 0) { alert('Enter a valid bid amount.'); return; }
+            if (!confirm('Confirm bid of £' + amount.toFixed(2) + '?')) return;
+            btn.prop('disabled',true).text('Placing…');
+            $.post(lsgGrid.ajax, {
+                action: 'lsg_place_bid',
+                product_id: pid,
+                amount: amount,
+                _ajax_nonce: lsgGrid.nonce
+            }, function(r){
+                if (r.success) {
+                    input.val('');
+                    if (r.data && r.data.html) $('#product-'+pid).replaceWith(r.data.html);
+                } else {
+                    alert(r.data || 'Could not place bid.');
+                }
+                btn.prop('disabled',false).text('🔨 Place Bid');
+            }).fail(function(){ btn.prop('disabled',false).text('🔨 Place Bid'); });
+        });
+
+        // Auction countdown
+        function updateAuctionTimers() {
+            var now = Math.floor(Date.now()/1000);
+            $('.lsg-auction-timer[data-end]').each(function(){
+                var el  = $(this), end = parseInt(el.data('end'),10), left = end - now;
+                var cnt = el.find('.lsg-auction-timer-count');
+                if (left <= 0) { cnt.text('00:00'); } else {
+                    var m=Math.floor(left/60), s=left%60;
+                    cnt.text((m<10?'0':'')+m+':'+(s<10?'0':'')+s);
+                    if (left <= 10) el.css('color','#e74c3c');
+                }
+            });
+        }
+        setInterval(updateAuctionTimers, 1000);
+    });
+    </script>
+    <?php }, 20 );
+
+    return ob_get_clean();
+} );
+
+// ============================================================
+// 3b. Shortcode  [lsg_giveaway_timer product_id="X"]
+//     Embeds a standalone giveaway countdown + enter button
+//     (Overlay-friendly — semi-transparent background included)
+// ============================================================
+add_shortcode( 'lsg_giveaway_timer', function( $atts ) {
+    $atts = shortcode_atts( [ 'product_id' => 0 ], $atts );
+    $pid  = absint( $atts['product_id'] );
+    if ( ! $pid ) return '<p>lsg_giveaway_timer: missing product_id attribute.</p>';
+
+    $d = lsg_get_product_data( $pid );
+    if ( ! $d || empty( $d['is_giveaway'] ) ) return '<p>Product not found or not a giveaway.</p>';
+
+    $status   = $d['giveaway_status'];
+    $end_time = (int) $d['giveaway_end_time'];
+    $has_entered = ! empty( $d['has_entered'] );
+    $winner   = esc_html( $d['giveaway_winner'] ?: 'No entrants' );
+    $nonce    = wp_create_nonce( 'lsg_actions' );
+
+    if ( $status === 'ended' ) {
+        $is_you   = ! empty( $d['is_giveaway_winner'] );
+        $banner   = $is_you
+            ? '<div class="lsg-ot-winner lsg-ot-winner-you">🏆 You won! Check your email.</div>'
+            : '<div class="lsg-ot-winner">🏆 Winner: <strong>' . $winner . '</strong></div>';
+        $body = $banner;
+    } elseif ( $status === 'running' ) {
+        $enter_btn = $has_entered || ! is_user_logged_in()
+            ? ( $has_entered ? '<button class="lsg-ot-btn lsg-ot-btn-entered" disabled>✓ Entered</button>' : '<a href="' . esc_url( wp_login_url() ) . '" class="lsg-ot-btn">Login to Enter</a>' )
+            : '<button class="lsg-ot-btn lsg-ot-enter" data-id="' . esc_attr( $pid ) . '" data-nonce="' . esc_attr( $nonce ) . '">🎟 Enter Giveaway</button>';
+        $body = '<div class="lsg-ot-timer-row">'
+            . '<span class="lsg-ot-label">⏱ Ends in</span>'
+            . '<span class="lsg-ot-count" data-end="' . esc_attr( $end_time ) . '"></span>'
+            . '</div>'
+            . $enter_btn;
+    } else {
+        $body = '<div class="lsg-ot-idle">⏳ Giveaway Starting Soon</div>';
+    }
+
+    ob_start(); ?>
+    <div class="lsg-overlay-timer" id="lsg-ot-<?php echo esc_attr( $pid ); ?>">
+        <div class="lsg-ot-inner">
+            <div class="lsg-ot-name"><?php echo esc_html( $d['name'] ); ?></div>
+            <?php echo $body; ?>
+        </div>
+    </div>
+    <style>
+    .lsg-overlay-timer { display:inline-block; }
+    .lsg-ot-inner { background:rgba(0,0,0,.55); backdrop-filter:blur(4px); color:#fff;
+        border-radius:12px; padding:14px 20px; text-align:center; min-width:200px; }
+    .lsg-ot-name { font-size:14px; font-weight:700; margin-bottom:8px; opacity:.9; }
+    .lsg-ot-timer-row { display:flex; align-items:center; justify-content:center; gap:8px; margin-bottom:10px; }
+    .lsg-ot-label { font-size:12px; opacity:.8; }
+    .lsg-ot-count { font-size:28px; font-weight:900; letter-spacing:2px; }
+    .lsg-ot-count.lsg-ot-urgent { color:#ff6b6b; }
+    .lsg-ot-btn { display:inline-block; padding:9px 20px; background:#8e44ad; color:#fff;
+        border:none; border-radius:6px; font-size:14px; font-weight:700; cursor:pointer;
+        text-decoration:none; transition:background .2s; }
+    .lsg-ot-btn:hover { background:#7d3c98; color:#fff; }
+    .lsg-ot-btn-entered { background:#27ae60; cursor:not-allowed; }
+    .lsg-ot-idle { font-size:14px; opacity:.8; }
+    .lsg-ot-winner { background:rgba(255,243,147,.25); border:1px solid rgba(255,243,147,.5);
+        border-radius:6px; padding:8px 12px; font-size:13px; }
+    .lsg-ot-winner-you { background:rgba(46,213,115,.3); border-color:rgba(46,213,115,.6); }
+    </style>
+    <script>
+    jQuery(function($){
+        (function lsgOtTick(){
+            var el  = $('.lsg-ot-count[data-end]');
+            if (!el.length) return;
+            var end  = parseInt(el.data('end'),10);
+            var left = Math.max(0, end - Math.floor(Date.now()/1000));
+            var m = Math.floor(left/60), s = left % 60;
+            el.text((m<10?'0':'')+m+':'+(s<10?'0':'')+s);
+            el.toggleClass('lsg-ot-urgent', left <= 10);
+            if (left > 0) setTimeout(lsgOtTick, 1000);
+        })();
+
+        $(document).on('click', '.lsg-ot-enter', function(){
+            var btn   = $(this);
+            var pid   = btn.data('id');
+            var nonce = btn.data('nonce');
+            btn.prop('disabled',true).text('Entering…');
+            $.post('<?php echo esc_url( admin_url( 'admin-ajax.php' ) ); ?>', {
+                action: 'lsg_enter_giveaway', product_id: pid, _ajax_nonce: nonce
+            }, function(r){
+                if (r.success) {
+                    btn.replaceWith('<button class="lsg-ot-btn lsg-ot-btn-entered" disabled>✓ Entered</button>');
+                } else {
+                    alert(r.data || 'Could not enter.');
+                    btn.prop('disabled',false).text('🎟 Enter Giveaway');
+                }
+            });
+        });
+    });
+    </script>
+    <?php
+    return ob_get_clean();
+} );
+
+// ============================================================
+// 3c. Shortcode  [lsg_auction_widget product_id="X"]
+//     Embeds a standalone auction countdown + bid form overlay
+// ============================================================
+add_shortcode( 'lsg_auction_widget', function( $atts ) {
+    $atts = shortcode_atts( [ 'product_id' => 0 ], $atts );
+    $pid  = absint( $atts['product_id'] );
+    if ( ! $pid ) return '<p>lsg_auction_widget: missing product_id attribute.</p>';
+
+    $d = lsg_get_product_data( $pid );
+    if ( ! $d || empty( $d['is_auction'] ) ) return '<p>Product not found or not an auction.</p>';
+
+    $status      = $d['auction_status'];
+    $current_bid = (float) $d['auction_current_bid'];
+    $base        = (float) $d['auction_base_price'];
+    $bidder      = esc_html( $d['auction_current_bidder'] );
+    $display_bid = $current_bid > 0 ? $current_bid : $base;
+    $nonce       = wp_create_nonce( 'lsg_actions' );
+
+    if ( $status === 'ended' ) {
+        $is_you = ! empty( $d['is_auction_winner'] );
+        $body = $is_you
+            ? '<div class="lsg-ot-winner lsg-ot-winner-you">🏆 You won! Bid: ' . strip_tags( wc_price( $current_bid ) ) . '</div>'
+            : '<div class="lsg-ot-winner">🔨 Winner: <strong>' . $bidder . '</strong> — ' . strip_tags( wc_price( $current_bid ) ) . '</div>';
+    } elseif ( $status === 'running' ) {
+        $min_bid = number_format( $display_bid + 0.01, 2, '.', '' );
+        $body = '<div class="lsg-ot-timer-row">'
+            . '<span class="lsg-ot-label">⏱ Ends in</span>'
+            . '<span class="lsg-ot-count lsg-ot-auction-count" data-end="' . esc_attr( $d['auction_end_time'] ) . '" data-pid="' . esc_attr( $pid ) . '"></span>'
+            . '</div>'
+            . '<div style="margin-bottom:8px;font-size:13px;">Current bid: <strong class="lsg-ot-bid-val-' . esc_attr( $pid ) . '">' . strip_tags( wc_price( $display_bid ) ) . '</strong>'
+            . ( $bidder ? ' by <em>' . $bidder . '</em>' : '' ) . '</div>'
+            . ( is_user_logged_in()
+                ? '<input type="number" class="lsg-ot-bid-input" data-id="' . esc_attr( $pid ) . '" placeholder="Your bid" step="0.01" min="' . esc_attr( $min_bid ) . '" style="width:100%;padding:7px 10px;border-radius:6px;border:none;font-size:14px;box-sizing:border-box;margin-bottom:6px;">'
+                  . '<button class="lsg-ot-btn lsg-ot-place-bid" data-id="' . esc_attr( $pid ) . '" data-nonce="' . esc_attr( $nonce ) . '">🔨 Place Bid</button>'
+                : '<a href="' . esc_url( wp_login_url() ) . '" class="lsg-ot-btn">Login to Bid</a>' );
+    } else {
+        $body = '<div class="lsg-ot-idle">⏳ Auction Starting Soon</div>'
+            . '<div style="font-size:13px;margin-top:4px;">Starting bid: <strong>' . strip_tags( wc_price( $base ) ) . '</strong></div>';
+    }
+
+    ob_start(); ?>
+    <div class="lsg-overlay-timer lsg-overlay-auction" id="lsg-ow-<?php echo esc_attr( $pid ); ?>">
+        <div class="lsg-ot-inner" style="border-top:3px solid #e67e22;">
+            <div class="lsg-ot-name"><?php echo esc_html( $d['name'] ); ?> <span style="font-size:11px;background:#e67e22;padding:1px 6px;border-radius:10px;">🔨 Auction</span></div>
+            <?php echo $body; ?>
+        </div>
+    </div>
+    <script>
+    jQuery(function($){
+        (function lsgAuctionOtTick(){
+            var el = $('.lsg-ot-auction-count[data-end]');
+            if (!el.length) return;
+            var end  = parseInt(el.data('end'),10);
+            var left = Math.max(0, end - Math.floor(Date.now()/1000));
+            var m = Math.floor(left/60), s = left % 60;
+            el.text((m<10?'0':'')+m+':'+(s<10?'0':'')+s);
+            el.toggleClass('lsg-ot-urgent', left <= 10);
+            if (left > 0) setTimeout(lsgAuctionOtTick, 1000);
+        })();
+
+        $(document).on('click', '.lsg-ot-place-bid', function(){
+            var btn    = $(this);
+            var pid    = btn.data('id');
+            var nonce  = btn.data('nonce');
+            var amount = parseFloat($('.lsg-ot-bid-input[data-id="'+pid+'"]').val());
+            if (!amount || isNaN(amount)) { alert('Enter a valid bid.'); return; }
+            if (!confirm('Confirm bid of ' + amount.toFixed(2) + '?')) return;
+            btn.prop('disabled',true).text('Placing…');
+            $.post('<?php echo esc_url( admin_url( 'admin-ajax.php' ) ); ?>', {
+                action: 'lsg_place_bid', product_id: pid, amount: amount, _ajax_nonce: nonce
+            }, function(r){
+                if (r.success) {
+                    if (r.data && r.data.current_bid) {
+                        $('.lsg-ot-bid-val-'+pid).text(r.data.current_bid_formatted);
+                        $('.lsg-ot-bid-input[data-id="'+pid+'"]').val('').attr('min', parseFloat(r.data.current_bid)+0.01);
+                    }
+                } else { alert(r.data || 'Could not place bid.'); }
+                btn.prop('disabled',false).text('🔨 Place Bid');
+            });
+        });
+    });
+    </script>
+    <?php
     return ob_get_clean();
 } );
 
@@ -1174,6 +1822,14 @@ function lsg_ajax_get_product_card() {
     wp_send_json_success( [ 'html' => lsg_render_product_card( $d ) ] );
 }
 
+// Lightweight version check — used by grid JS polling fallback
+add_action( 'wp_ajax_lsg_get_global_version',        'lsg_ajax_get_global_version' );
+add_action( 'wp_ajax_nopriv_lsg_get_global_version', 'lsg_ajax_get_global_version' );
+function lsg_ajax_get_global_version() {
+    check_ajax_referer( 'lsg_actions', '_ajax_nonce' );
+    wp_send_json_success( [ 'version' => (int) get_option( 'lsg_global_version', 0 ) ] );
+}
+
 // ============================================================
 // 6. Frontend AJAX – Claim product
 // ============================================================
@@ -1209,6 +1865,21 @@ function lsg_ajax_claim_product() {
     $waitlist = array_values( array_diff( $waitlist, [ $username ] ) );
     update_post_meta( $pid, 'lsg_waitlist', $waitlist );
 
+    // Add product to the user's WooCommerce cart automatically
+    if ( WC()->cart ) {
+        // Check if already in cart to avoid duplicates
+        $already_in_cart = false;
+        foreach ( WC()->cart->get_cart() as $cart_item ) {
+            if ( (int) $cart_item['product_id'] === $pid ) {
+                $already_in_cart = true;
+                break;
+            }
+        }
+        if ( ! $already_in_cart ) {
+            WC()->cart->add_to_cart( $pid, 1 );
+        }
+    }
+
     // Sync short description
     lsg_sync_short_description( $pid );
 
@@ -1220,6 +1891,7 @@ function lsg_ajax_claim_product() {
         'version'      => $new_version,
         'notification' => $notif,
         'notif_type'   => 'success',
+        'claimer'      => $username,
     ] );
 
     wp_send_json_success( [ 'notification' => $notif ] );
@@ -1279,12 +1951,35 @@ function lsg_ajax_enter_giveaway() {
     $end_time = (int) get_post_meta( $pid, 'lsg_giveaway_end_time', true );
     if ( $status !== 'running' || time() >= $end_time ) wp_send_json_error( 'Giveaway is not active.' );
 
+    // Claimed-only restriction — user must have claimed ANY product in this live sale
+    if ( get_post_meta( $pid, 'lsg_giveaway_claimed_only', true ) ) {
+        $args = [
+            'post_type'      => 'product',
+            'posts_per_page' => -1,
+            'fields'         => 'ids',
+            'tax_query'      => [ [ 'taxonomy' => 'product_cat', 'field' => 'slug', 'terms' => 'live-sale' ] ],
+        ];
+        $live_sale_ids   = get_posts( $args );
+        $user_has_claimed = false;
+        foreach ( $live_sale_ids as $lsid ) {
+            $cu = get_post_meta( $lsid, 'claimed_users', true ) ?: [];
+            if ( in_array( $username, $cu, true ) ) {
+                $user_has_claimed = true;
+                break;
+            }
+        }
+        if ( ! $user_has_claimed ) {
+            wp_send_json_error( 'This giveaway is only open to customers who have claimed a product in this live sale.' );
+        }
+    }
+
     $entrants = get_post_meta( $pid, 'lsg_giveaway_entrants', true ) ?: [];
     if ( in_array( $username, $entrants, true ) ) wp_send_json_error( 'You have already entered.' );
 
     $entrants[] = $username;
     update_post_meta( $pid, 'lsg_giveaway_entrants', $entrants );
 
+    lsg_increment_global_version();
     lsg_ably_publish( ABLY_PRODUCT_CHANNEL, 'product-updated', [
         'product_id' => $pid,
         'version'    => (int) get_post_meta( $pid, '_lsg_version', true ),
@@ -1309,6 +2004,7 @@ add_action( 'wp_ajax_lsg_start_giveaway', function () {
     update_post_meta( $pid, 'lsg_giveaway_winner',   '' );
 
     $product = wc_get_product( $pid );
+    lsg_increment_global_version();
     lsg_ably_publish( ABLY_PRODUCT_CHANNEL, 'giveaway-started', [
         'product_id' => $pid,
         'name'       => $product ? $product->get_name() : '',
@@ -1491,6 +2187,193 @@ function lsg_ajax_auto_roll_winner() {
 }
 
 // ============================================================
+// 7c. Auction AJAX handlers
+// ============================================================
+
+// Front-end: place a bid
+add_action( 'wp_ajax_lsg_place_bid', 'lsg_ajax_place_bid' );
+function lsg_ajax_place_bid() {
+    check_ajax_referer( 'lsg_actions', '_ajax_nonce' );
+    if ( ! is_user_logged_in() ) wp_send_json_error( 'Please log in first.' );
+
+    $pid    = absint( $_POST['product_id'] ?? 0 );
+    $amount = floatval( $_POST['amount'] ?? 0 );
+    $user   = wp_get_current_user();
+    $username = $user->display_name ?: $user->user_login;
+
+    if ( ! $pid || $amount <= 0 ) wp_send_json_error( 'Invalid bid.' );
+
+    $status   = get_post_meta( $pid, 'lsg_auction_status', true );
+    $end_time = (int) get_post_meta( $pid, 'lsg_auction_end_time', true );
+    if ( $status !== 'running' || time() >= $end_time ) wp_send_json_error( 'Auction is not active.' );
+
+    $base        = (float) get_post_meta( $pid, 'lsg_auction_base_price',    true );
+    $current_bid = (float) get_post_meta( $pid, 'lsg_auction_current_bid',   true );
+    $min_valid   = $current_bid > 0 ? $current_bid : $base;
+
+    if ( $amount <= $min_valid ) {
+        wp_send_json_error( 'Bid must be higher than current bid (' . strip_tags( wc_price( $min_valid ) ) . ').' );
+    }
+
+    // Anti-snipe: if < 10 seconds left, extend by 10 seconds
+    $seconds_left = $end_time - time();
+    if ( $seconds_left < 10 ) {
+        $new_end = time() + 10;
+        update_post_meta( $pid, 'lsg_auction_end_time', $new_end );
+        $end_time = $new_end;
+    }
+
+    update_post_meta( $pid, 'lsg_auction_current_bid',     $amount );
+    update_post_meta( $pid, 'lsg_auction_current_bidder',  $username );
+
+    // Append to bid history
+    $bids   = get_post_meta( $pid, 'lsg_auction_bids', true ) ?: [];
+    $bids[] = [ 'user' => $username, 'amount' => $amount, 'time' => time() ];
+    update_post_meta( $pid, 'lsg_auction_bids', $bids );
+
+    $v = (int) get_post_meta( $pid, '_lsg_version', true ) + 1;
+    update_post_meta( $pid, '_lsg_version', $v );
+    lsg_increment_global_version();
+
+    $product = wc_get_product( $pid );
+    lsg_ably_publish( ABLY_PRODUCT_CHANNEL, 'auction-bid', [
+        'product_id'        => $pid,
+        'version'           => $v,
+        'current_bid'       => $amount,
+        'current_bidder'    => $username,
+        'auction_end_time'  => $end_time,
+        'notification'      => $username . ' placed a bid of ' . strip_tags( wc_price( $amount ) ) . ' on ' . ( $product ? $product->get_name() : '' ) . '!',
+        'notif_type'        => 'info',
+    ] );
+
+    $d = lsg_get_product_data( $pid );
+    wp_send_json_success( [
+        'current_bid'           => $amount,
+        'current_bid_formatted' => strip_tags( wc_price( $amount ) ),
+        'auction_end_time'      => $end_time,
+        'html'                  => $d ? lsg_render_product_card( $d ) : '',
+    ] );
+}
+
+// Admin: start auction
+add_action( 'wp_ajax_lsg_start_auction', function () {
+    check_ajax_referer( 'live_sale_update', '_ajax_nonce' );
+    if ( ! current_user_can( 'manage_woocommerce' ) ) wp_send_json_error( 'Unauthorized' );
+
+    $pid      = absint( $_POST['product_id'] ?? 0 );
+    $duration = max( 1, (int) ( $_POST['duration'] ?? 5 ) );
+    if ( ! $pid ) wp_send_json_error( 'Invalid product.' );
+
+    $end_time = time() + $duration * 60;
+    update_post_meta( $pid, 'lsg_auction_status',          'running' );
+    update_post_meta( $pid, 'lsg_auction_end_time',        $end_time );
+    update_post_meta( $pid, 'lsg_auction_current_bid',     0 );
+    update_post_meta( $pid, 'lsg_auction_current_bidder',  '' );
+    update_post_meta( $pid, 'lsg_auction_bids',            [] );
+
+    $product = wc_get_product( $pid );
+    lsg_increment_global_version();
+    lsg_ably_publish( ABLY_PRODUCT_CHANNEL, 'auction-started', [
+        'product_id'       => $pid,
+        'name'             => $product ? $product->get_name() : '',
+        'auction_end_time' => $end_time,
+    ] );
+
+    wp_send_json_success( [
+        'end_time' => $end_time,
+        'html'     => lsg_render_admin_row( $pid ),
+    ] );
+} );
+
+// Admin: end auction (declare winner)
+add_action( 'wp_ajax_lsg_end_auction', function () {
+    check_ajax_referer( 'live_sale_update', '_ajax_nonce' );
+    if ( ! current_user_can( 'manage_woocommerce' ) ) wp_send_json_error( 'Unauthorized' );
+
+    $pid = absint( $_POST['product_id'] ?? 0 );
+    if ( ! $pid ) wp_send_json_error( 'Invalid product.' );
+
+    $status = get_post_meta( $pid, 'lsg_auction_status', true );
+    if ( $status === 'ended' ) {
+        wp_send_json_success( [
+            'winner' => (string) get_post_meta( $pid, 'lsg_auction_current_bidder', true ) ?: 'No bids',
+            'html'   => lsg_render_admin_row( $pid ),
+        ] );
+    }
+
+    update_post_meta( $pid, 'lsg_auction_status', 'ended' );
+
+    $winner_name = (string) get_post_meta( $pid, 'lsg_auction_current_bidder', true );
+    $winning_bid = (float)  get_post_meta( $pid, 'lsg_auction_current_bid',    true );
+    $product     = wc_get_product( $pid );
+
+    if ( $winner_name ) {
+        // Add winner to claimed_users
+        $claimed   = get_post_meta( $pid, 'claimed_users', true ) ?: [];
+        $claimed[] = $winner_name;
+        update_post_meta( $pid, 'claimed_users', array_unique( $claimed ) );
+        lsg_sync_short_description( $pid );
+
+        // Update product price to winning bid
+        if ( $product && $winning_bid > 0 ) {
+            $product->set_regular_price( $winning_bid );
+            $product->set_price( $winning_bid );
+            $product->save();
+        }
+        lsg_send_auction_win_email( $pid, $winner_name, $winning_bid );
+    }
+
+    $v = (int) get_post_meta( $pid, '_lsg_version', true ) + 1;
+    update_post_meta( $pid, '_lsg_version', $v );
+    lsg_increment_global_version();
+    lsg_ably_publish( ABLY_PRODUCT_CHANNEL, 'auction-ended', [
+        'product_id' => $pid,
+        'winner'     => $winner_name ?: 'No bids',
+        'amount'     => $winning_bid,
+        'version'    => $v,
+    ] );
+
+    wp_send_json_success( [
+        'winner' => $winner_name ?: 'No bids',
+        'html'   => lsg_render_admin_row( $pid ),
+    ] );
+} );
+
+function lsg_send_auction_win_email( int $pid, string $winner_username, float $amount ) : void {
+    $winner_user = get_user_by( 'login', $winner_username );
+    if ( ! $winner_user ) {
+        $candidates = get_users( [ 'search' => $winner_username, 'search_columns' => [ 'display_name' ], 'number' => 5 ] );
+        foreach ( $candidates as $u ) {
+            if ( $u->display_name === $winner_username ) { $winner_user = $u; break; }
+        }
+    }
+    if ( ! $winner_user ) return;
+
+    $product   = wc_get_product( $pid );
+    $site_name = get_bloginfo( 'name' );
+    $subject   = '🔨 You won the ' . $site_name . ' auction!';
+    $message   = 'Hi ' . $winner_user->display_name . ",\n\n"
+        . 'Congratulations! You won the auction for:' . "\n\n"
+        . '  * ' . ( $product ? $product->get_name() : 'Product #' . $pid ) . "\n"
+        . '  * Winning bid: ' . strip_tags( wc_price( $amount ) ) . "\n\n"
+        . 'Our team will be in touch to arrange payment and delivery.' . "\n\n"
+        . 'Thank you for participating!' . "\n\n"
+        . 'Best regards,' . "\n" . $site_name;
+    wp_mail( $winner_user->user_email, $subject, $message );
+}
+
+// ============================================================
+// 7d. Admin AJAX – Refresh single admin row (used by real-time Ably subscription)
+// ============================================================
+add_action( 'wp_ajax_lsg_refresh_admin_row', function () {
+    check_ajax_referer( 'live_sale_update', '_ajax_nonce' );
+    if ( ! current_user_can( 'manage_woocommerce' ) ) wp_send_json_error( 'Unauthorized' );
+    $pid = absint( $_REQUEST['product_id'] ?? 0 );
+    if ( ! $pid ) wp_send_json_error( 'No product ID' );
+    wp_send_json_success( [ 'html' => lsg_render_admin_row( $pid ) ] );
+} );
+
+// ============================================================
 // 8. Admin AJAX – Refresh admin list
 // ============================================================
 add_action( 'wp_ajax_lsg_refresh_admin_list', function () {
@@ -1502,8 +2385,25 @@ add_action( 'wp_ajax_lsg_refresh_admin_list', function () {
 } );
 
 // ============================================================
-// 9. Admin AJAX – Update price
+// 9. Admin AJAX – Update price / product name
 // ============================================================
+add_action( 'wp_ajax_lsg_update_product_name', function () {
+    check_ajax_referer( 'live_sale_update', '_ajax_nonce' );
+    if ( ! current_user_can( 'manage_woocommerce' ) ) wp_send_json_error( 'Unauthorized' );
+    $pid  = absint( $_POST['product_id'] );
+    $name = sanitize_text_field( $_POST['value'] ?? '' );
+    if ( ! $pid || $name === '' ) wp_send_json_error( 'Invalid data.' );
+    $p = wc_get_product( $pid );
+    if ( ! $p ) wp_send_json_error( 'Product not found.' );
+    $p->set_name( $name );
+    $p->save();
+    $v = (int) get_post_meta( $pid, '_lsg_version', true ) + 1;
+    update_post_meta( $pid, '_lsg_version', $v );
+    lsg_increment_global_version();
+    lsg_ably_publish( ABLY_PRODUCT_CHANNEL, 'product-updated', [ 'product_id' => $pid, 'version' => $v ] );
+    wp_send_json_success( [ 'html' => lsg_render_admin_row( $pid ) ] );
+} );
+
 add_action( 'wp_ajax_lsg_update_price', function () {
     check_ajax_referer( 'live_sale_update', '_ajax_nonce' );
     if ( ! current_user_can( 'manage_woocommerce' ) ) wp_send_json_error();
@@ -1671,171 +2571,207 @@ add_action( 'woocommerce_checkout_process', 'lsg_validate_cart_claims' );
 // ============================================================
 add_shortcode( 'live_sale_chat', 'lsg_chat_shortcode' );
 function lsg_chat_shortcode() : string {
+    if ( ! is_user_logged_in() ) {
+        return '<p>Please <a href="' . esc_url( wp_login_url( get_permalink() ) ) . '">login</a> to view the chat.</p>';
+    }
     $is_admin = current_user_can( 'manage_options' );
     ob_start();
     ?>
     <div id="lsg-chat">
-        <div id="lsg-chat-header">
-            <span class="lsg-chat-title">Live Chat</span>
+        <div id="lsg-live-bar">
+            <span class="lsg-live-pill">🔴 LIVE</span>
+            <span id="lsg-viewer-count">👁 <span id="lsg-viewer-num">—</span></span>
+            <?php if ( $is_admin ) : ?>
+            <button id="lsg-chat-clear" title="Clear all messages">🗑</button>
+            <?php endif; ?>
         </div>
         <div id="lsg-chat-messages"></div>
         <div id="lsg-chat-footer">
+            <?php if ( is_user_logged_in() ) : ?>
             <div id="lsg-chat-input-row">
-                <input type="text" id="lsg-chat-input" placeholder="Type a message…" autocomplete="off">
+                <input type="text" id="lsg-chat-input" placeholder="Comment…" autocomplete="off" maxlength="200">
                 <button id="lsg-chat-send" title="Send">
                     <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
                 </button>
             </div>
-            <?php if ( $is_admin ) : ?>
-            <div id="lsg-chat-admin-bar">
-                <button id="lsg-chat-clear">🗑 Clear All Messages</button>
+            <?php else : ?>
+            <div id="lsg-chat-login-prompt">
+                <a href="<?php echo esc_url( wp_login_url( get_permalink() ) ); ?>">Log in</a> to comment
             </div>
             <?php endif; ?>
         </div>
     </div>
     <style>
+        /* ── Live Sale Chat – TikTok-style stream overlay ── */
         #lsg-chat {
-            max-width: 700px;
+            max-width: 480px;
+            width: 100%;
             margin: 0 auto;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            border-radius: 16px;
-            overflow: hidden;
-            box-shadow: 0 4px 28px rgba(0,0,0,0.10);
-            background: #fff;
-            border: 1px solid #e5e7eb;
-        }
-        #lsg-chat-header {
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            padding: 15px 20px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .lsg-live-dot {
-            width: 10px; height: 10px;
-            background: #2ecc71;
-            border-radius: 50%;
-            animation: lsg-chat-pulse-dot 1.6s infinite;
-            flex-shrink: 0;
-        }
-        .lsg-chat-title {
-            color: #fff;
-            font-weight: 700;
-            font-size: 15px;
-            letter-spacing: 0.2px;
-        }
-        #lsg-chat-messages {
-            height: 380px;
-            overflow-y: auto;
-            padding: 18px 16px;
-            background: #f8fafc;
+            height: 78vh;
+            min-height: 520px;
             display: flex;
             flex-direction: column;
-            gap: 14px;
-            scroll-behavior: smooth;
+            background: rgba(16, 16, 20, 0.88);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+            border-radius: 20px;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            border: 1px solid rgba(255,255,255,0.09);
+            box-shadow: 0 8px 48px rgba(0,0,0,0.65), inset 0 0 0 1px rgba(255,255,255,0.04);
         }
-        #lsg-chat-messages::-webkit-scrollbar { width: 4px; }
-        #lsg-chat-messages::-webkit-scrollbar-track { background: transparent; }
-        #lsg-chat-messages::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 2px; }
-        .lsg-chat-msg {
-            display: flex;
-            align-items: flex-start;
-            gap: 10px;
-            animation: lsg-chat-fadein 0.2s ease;
-        }
-        .lsg-chat-avatar {
-            width: 36px; height: 36px;
-            border-radius: 50%;
-            display: flex; align-items: center; justify-content: center;
-            color: #fff;
-            font-weight: 700;
-            font-size: 14px;
-            flex-shrink: 0;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.15);
-        }
-        .lsg-chat-bubble {
-            background: #fff;
-            border-radius: 0 14px 14px 14px;
-            padding: 9px 13px;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.07);
-            border: 1px solid #e5e7eb;
-            flex: 1;
-            min-width: 0;
-        }
-        .lsg-chat-bubble-admin {
-            background: #eff6ff;
-            border-color: #bfdbfe;
-        }
-        .lsg-chat-meta {
+        /* Live bar */
+        #lsg-live-bar {
             display: flex;
             align-items: center;
-            gap: 6px;
-            margin-bottom: 3px;
+            gap: 10px;
+            padding: 10px 16px;
+            background: rgba(0,0,0,0.35);
+            border-bottom: 1px solid rgba(255,255,255,0.07);
+            flex-shrink: 0;
+        }
+        .lsg-live-pill {
+            background: #fe2c55;
+            color: #fff;
+            font-size: 10px;
+            font-weight: 900;
+            padding: 3px 10px;
+            border-radius: 20px;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            animation: lsg-live-pulse 2.2s ease-in-out infinite;
+        }
+        @keyframes lsg-live-pulse {
+            0%,100% { box-shadow: 0 0 0 0 rgba(254,44,85,0.5); }
+            50%      { box-shadow: 0 0 0 7px rgba(254,44,85,0); }
+        }
+        #lsg-viewer-count { font-size: 12px; color: rgba(255,255,255,0.6); }
+        #lsg-chat-clear {
+            margin-left: auto;
+            background: none;
+            border: none;
+            color: rgba(255,255,255,0.35);
+            font-size: 17px;
+            cursor: pointer;
+            padding: 3px 7px;
+            border-radius: 7px;
+            transition: color 0.15s, background 0.15s;
+        }
+        #lsg-chat-clear:hover { color: #fe2c55; background: rgba(254,44,85,0.18); }
+
+        /* Messages area */
+        #lsg-chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: 14px 14px 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            scroll-behavior: smooth;
+            -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 18%);
+            mask-image: linear-gradient(to bottom, transparent 0%, #000 18%);
+        }
+        #lsg-chat-messages::-webkit-scrollbar { width: 3px; }
+        #lsg-chat-messages::-webkit-scrollbar-track { background: transparent; }
+        #lsg-chat-messages::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 2px; }
+
+        /* Old messages fade out — pure CSS, no JS */
+        #lsg-chat-messages > *:nth-last-child(n+9) { opacity: 0.2; }
+        #lsg-chat-messages > *:nth-last-child(8)   { opacity: 0.35; }
+        #lsg-chat-messages > *:nth-last-child(7)   { opacity: 0.47; }
+        #lsg-chat-messages > *:nth-last-child(6)   { opacity: 0.58; }
+        #lsg-chat-messages > *:nth-last-child(5)   { opacity: 0.72; }
+
+        /* Each message — compact inline row */
+        .lsg-chat-msg {
+            display: flex;
+            align-items: baseline;
+            flex-wrap: wrap;
+            gap: 4px;
+            padding: 5px 10px;
+            border-radius: 10px;
+            background: rgba(255,255,255,0.05);
+            line-height: 1.5;
+            animation: lsg-msg-in 0.22s ease;
+            transition: opacity 0.4s ease;
+        }
+        @keyframes lsg-msg-in {
+            from { opacity: 0; transform: translateY(10px); }
+            to   { opacity: 1; transform: translateY(0); }
         }
         .lsg-chat-username {
             font-weight: 700;
-            font-size: 12px;
-            color: #374151;
+            font-size: 12.5px;
+            flex-shrink: 0;
         }
         .lsg-admin-badge {
-            background: #3b82f6;
+            background: rgba(59,130,246,0.85);
             color: #fff;
             font-size: 9px;
             font-weight: 700;
-            padding: 1px 6px;
+            padding: 1px 5px;
             border-radius: 4px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            vertical-align: middle;
         }
+        .lsg-chat-sep { color: rgba(255,255,255,0.35); font-size: 12px; flex-shrink: 0; }
         .lsg-chat-text {
-            font-size: 14px;
-            color: #1f2937;
-            line-height: 1.55;
+            font-size: 13px;
+            color: rgba(255,255,255,0.9);
             word-break: break-word;
+            flex: 1;
+            min-width: 0;
         }
         .lsg-del-btn {
             background: none;
             border: none;
-            color: #d1d5db;
+            color: rgba(255,255,255,0.2);
             cursor: pointer;
-            font-size: 20px;
+            font-size: 18px;
+            padding: 0 3px;
             line-height: 1;
-            padding: 4px 6px;
-            border-radius: 6px;
             flex-shrink: 0;
-            margin-top: 6px;
-            transition: color 0.15s, background 0.15s;
+            transition: color 0.15s;
         }
-        .lsg-del-btn:hover { color: #ef4444; background: #fee2e2; }
+        .lsg-del-btn:hover { color: #fe2c55; }
+        .lsg-join-notif {
+            font-size: 11px;
+            color: rgba(255,255,255,0.42);
+            text-align: center;
+            padding: 3px 0;
+            animation: lsg-msg-in 0.25s ease;
+        }
+        .lsg-chat-failed { background: rgba(254,44,85,0.12) !important; }
+        .lsg-sending-tick { font-size: 11px; color: rgba(255,255,255,0.4); animation: lsg-tick-blink 1s ease infinite; display:inline-block; }
+        @keyframes lsg-tick-blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+        /* Footer */
         #lsg-chat-footer {
-            padding: 12px 16px;
-            background: #fff;
-            border-top: 1px solid #e5e7eb;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
+            padding: 10px 14px 14px;
+            background: rgba(0,0,0,0.3);
+            border-top: 1px solid rgba(255,255,255,0.07);
+            flex-shrink: 0;
         }
-        #lsg-chat-input-row {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-        }
+        #lsg-chat-input-row { display: flex; gap: 8px; align-items: center; }
         #lsg-chat-input {
             flex: 1;
             padding: 10px 18px;
-            border: 1.5px solid #e5e7eb;
+            border: 1.5px solid rgba(255,255,255,0.14);
             border-radius: 24px;
             font-size: 14px;
             outline: none;
-            background: #f8fafc;
+            background: rgba(255,255,255,0.08);
+            color: #fff;
+            caret-color: #fe2c55;
             transition: border-color 0.2s, background 0.2s;
-            color: #1f2937;
         }
-        #lsg-chat-input:focus { border-color: #3b82f6; background: #fff; }
-        #lsg-chat-input::placeholder { color: #9ca3af; }
+        #lsg-chat-input:focus { border-color: rgba(254,44,85,0.55); background: rgba(255,255,255,0.11); }
+        #lsg-chat-input::placeholder { color: rgba(255,255,255,0.38); }
         #lsg-chat-send {
-            width: 44px; height: 44px;
-            background: #3b82f6;
+            width: 42px; height: 42px;
+            background: #fe2c55;
             border: none;
             border-radius: 50%;
             cursor: pointer;
@@ -1843,98 +2779,45 @@ function lsg_chat_shortcode() : string {
             flex-shrink: 0;
             padding: 0;
             transition: background 0.2s, transform 0.1s;
-            box-shadow: 0 2px 8px rgba(59,130,246,0.35);
+            box-shadow: 0 2px 12px rgba(254,44,85,0.45);
         }
-        #lsg-chat-send:hover { background: #2563eb; }
-        #lsg-chat-send:active { transform: scale(0.92); }
+        #lsg-chat-send:hover { background: #e8194a; }
+        #lsg-chat-send:active { transform: scale(0.9); }
         #lsg-chat-send svg { width: 18px; height: 18px; fill: #fff; }
-        #lsg-chat-send:disabled { background: #93c5fd; cursor: not-allowed; box-shadow: none; }
-        #lsg-chat-admin-bar { display: flex; justify-content: flex-end; }
-        #lsg-chat-clear {
-            background: none;
-            border: 1px solid #e5e7eb;
-            color: #9ca3af;
-            font-size: 12px;
-            padding: 5px 14px;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.15s;
+        #lsg-chat-send:disabled { background: rgba(254,44,85,0.35); cursor: not-allowed; box-shadow: none; }
+        #lsg-chat-login-prompt {
+            text-align: center; font-size: 13px;
+            color: rgba(255,255,255,0.5); padding: 8px;
         }
-        #lsg-chat-clear:hover { border-color: #ef4444; color: #ef4444; background: #fef2f2; }
-        @keyframes lsg-chat-fadein {
-            from { opacity: 0; transform: translateY(8px); }
-            to   { opacity: 1; transform: none; }
-        }
-        @keyframes lsg-chat-pulse-dot {
-            0%,100% { box-shadow: 0 0 0 0 rgba(46,204,113,0.5); }
-            50%      { box-shadow: 0 0 0 6px rgba(46,204,113,0); }
-        }
-        .lsg-sending-tick {
-            font-size: 11px;
-            color: #9ca3af;
-            animation: lsg-tick-spin 1s linear infinite;
-            display: inline-block;
-        }
-        .lsg-chat-failed .lsg-sending-tick { animation: none; color: #ef4444; cursor: default; }
-        .lsg-chat-failed .lsg-chat-bubble { border-color: #fca5a5 !important; background: #fef2f2 !important; }
-        .lsg-chat-time {
-            font-size: 10px;
-            color: #9ca3af;
-            white-space: nowrap;
-            margin-left: auto;
-            padding-left: 6px;
-            flex-shrink: 0;
-        }
-        /* Skeleton loader */
+        #lsg-chat-login-prompt a { color: #fe2c55; font-weight: 600; text-decoration: none; }
+        #lsg-chat-login-prompt a:hover { text-decoration: underline; }
+
+        /* Skeleton */
         .lsg-skel-row {
-            display: flex;
-            align-items: flex-start;
-            gap: 10px;
-            animation: lsg-chat-fadein 0.3s ease;
+            display: flex; align-items: center; gap: 8px;
+            padding: 5px 10px; border-radius: 10px;
+            background: rgba(255,255,255,0.04);
+            animation: lsg-msg-in 0.3s ease;
         }
-        .lsg-skel-avatar {
-            width: 36px; height: 36px;
-            border-radius: 50%;
-            background: #e5e7eb;
-            flex-shrink: 0;
-            animation: lsg-skel-shimmer 1.4s infinite;
+        .lsg-skel-name  { width: 65px;  height: 9px; border-radius: 5px; }
+        .lsg-skel-wide  { width: 130px; height: 9px; border-radius: 5px; }
+        .lsg-skel-short { width: 85px;  height: 9px; border-radius: 5px; }
+        .lsg-skel-name, .lsg-skel-wide, .lsg-skel-short {
+            background: linear-gradient(90deg, rgba(255,255,255,0.07) 25%, rgba(255,255,255,0.14) 50%, rgba(255,255,255,0.07) 75%);
+            background-size: 800px 100%;
+            animation: lsg-skel-shimmer 1.4s infinite linear;
         }
-        .lsg-skel-bubble {
-            flex: 1;
-            background: #fff;
-            border: 1px solid #e5e7eb;
-            border-radius: 0 14px 14px 14px;
-            padding: 10px 14px;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        .lsg-skel-line {
-            height: 10px;
-            border-radius: 6px;
-            background: #e5e7eb;
-            animation: lsg-skel-shimmer 1.4s infinite;
-        }
-        .lsg-skel-name  { width: 28%; }
-        .lsg-skel-wide  { width: 72%; }
-        .lsg-skel-short { width: 44%; }
         @keyframes lsg-skel-shimmer {
-            0%   { background-color: #e5e7eb; }
-            50%  { background-color: #f3f4f6; }
-            100% { background-color: #e5e7eb; }
-        }
-        @keyframes lsg-tick-spin {
-            0%   { opacity: 1; }
-            50%  { opacity: 0.3; }
-            100% { opacity: 1; }
+            0%   { background-position: -800px 0; }
+            100% { background-position:  800px 0; }
         }
     </style>
     <?php
     wp_enqueue_script(
         'lsg-chat',
-        plugins_url( 'livesale-chat.js', __FILE__ ),
+        plugins_url( 'js/livesale-chat.js', __FILE__ ),
         [ 'jquery' ],
-        filemtime( plugin_dir_path( __FILE__ ) . 'livesale-chat.js' ),
+        filemtime( plugin_dir_path( __FILE__ ) . 'js/livesale-chat.js' ),
         true
     );
     $current_user = wp_get_current_user();
@@ -2016,3 +2899,4 @@ add_action( 'admin_enqueue_scripts', function ( $hook ) {
     if ( $hook !== 'toplevel_page_live-sale-manager' ) return;
     wp_enqueue_media();
 } );
+} // end if(false) — legacy reference block
