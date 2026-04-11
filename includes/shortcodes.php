@@ -201,6 +201,208 @@ function lsg_chat_shortcode( $atts ) : string {
 }
 
 // ============================================================
+// [lsg_giveaway_overlay]
+// Compact overlay widget — auto-finds the latest running giveaway.
+// No product_id needed. Use as an overlay on top of the live sale screen.
+// ============================================================
+add_shortcode( 'lsg_giveaway_overlay', 'lsg_giveaway_overlay_shortcode' );
+function lsg_giveaway_overlay_shortcode( $atts ) : string {
+
+    wp_enqueue_style(
+        'lsg-grid',
+        plugin_dir_url( dirname( __FILE__ ) ) . 'css/livesale-grid.css',
+        [],
+        '5.3'
+    );
+
+    // Find the latest running giveaway in the live-sale category
+    $active_pid      = 0;
+    $active_end_time = 0;
+    $active_name     = '';
+    $cat_id          = lsg_get_live_sale_category();
+
+    if ( $cat_id ) {
+        $live_products = get_posts( [
+            'post_type'      => 'product',
+            'posts_per_page' => -1,
+            'tax_query'      => [ [ 'taxonomy' => 'product_cat', 'field' => 'term_id', 'terms' => $cat_id ] ],
+            'meta_query'     => [
+                [ 'key' => 'lsg_is_giveaway',     'value' => '1' ],
+                [ 'key' => 'lsg_giveaway_status', 'value' => 'running' ],
+            ],
+            'orderby' => 'date',
+            'order'   => 'DESC',
+            'fields'  => 'ids',
+        ] );
+        if ( ! empty( $live_products ) ) {
+            $active_pid      = (int) $live_products[0];
+            $active_end_time = (int) get_post_meta( $active_pid, 'lsg_giveaway_end_time', true );
+            $active_name     = get_the_title( $active_pid );
+        }
+    }
+
+    $is_logged_in = is_user_logged_in();
+    $login_url    = wp_login_url( get_permalink() );
+    $current_user = wp_get_current_user();
+    $username     = $current_user->exists() ? ( $current_user->display_name ?: $current_user->user_login ) : '';
+    $has_entered  = false;
+    if ( $active_pid && $username ) {
+        $entrants    = get_post_meta( $active_pid, 'lsg_giveaway_entrants', true ) ?: [];
+        $has_entered = in_array( $username, (array) $entrants, true );
+    }
+
+    $nonce       = wp_create_nonce( 'lsg_actions' );
+    $ajax_url    = admin_url( 'admin-ajax.php' );
+    $ably_key    = ABLY_API_KEY;
+    $ably_chan    = ABLY_PRODUCT_CHANNEL;
+
+    ob_start();
+    ?>
+    <div id="lsg-giveaway-overlay"
+         class="lsg-giveaway-overlay<?php echo $active_pid ? ' lsg-gwo-active' : ' lsg-gwo-hidden'; ?>"
+         data-pid="<?php echo esc_attr( $active_pid ); ?>"
+         data-end="<?php echo esc_attr( $active_end_time ); ?>">
+
+        <div class="lsg-gwo-badge">🎁 GIVEAWAY</div>
+
+        <div class="lsg-gwo-timer" id="lsg-gwo-timer">
+            <?php echo $active_pid ? '' : '–'; ?>
+        </div>
+
+        <div class="lsg-gwo-actions" id="lsg-gwo-actions">
+            <?php if ( ! $is_logged_in ) : ?>
+                <a href="<?php echo esc_url( $login_url ); ?>" class="lsg-gwo-btn lsg-gwo-btn-login">🔒 Login to Join</a>
+            <?php elseif ( $active_pid && $has_entered ) : ?>
+                <button class="lsg-gwo-btn lsg-gwo-btn-entered" disabled>✓ Entered</button>
+            <?php elseif ( $active_pid ) : ?>
+                <button class="lsg-gwo-btn lsg-gwo-btn-join" id="lsg-gwo-join-btn">🎟 Join Giveaway</button>
+            <?php else : ?>
+                <span class="lsg-gwo-idle">No active giveaway</span>
+            <?php endif; ?>
+        </div>
+
+    </div>
+
+    <script>
+    (function(){
+        var overlay  = document.getElementById('lsg-giveaway-overlay');
+        if (!overlay) return;
+
+        var timerEl  = document.getElementById('lsg-gwo-timer');
+        var actionsEl= document.getElementById('lsg-gwo-actions');
+        var pid      = parseInt(overlay.dataset.pid, 10) || 0;
+        var endTime  = parseInt(overlay.dataset.end,  10) || 0;
+        var nonce    = <?php echo wp_json_encode( $nonce ); ?>;
+        var ajax     = <?php echo wp_json_encode( $ajax_url ); ?>;
+        var ablyKey  = <?php echo wp_json_encode( $ably_key ); ?>;
+        var ablyChan = <?php echo wp_json_encode( $ably_chan ); ?>;
+        var isLoggedIn = <?php echo $is_logged_in ? 'true' : 'false'; ?>;
+        var loginUrl   = <?php echo wp_json_encode( $login_url ); ?>;
+        var tickTimer;
+
+        // ---- Timer ----
+        function tick() {
+            if (!endTime || !pid) return;
+            var left = endTime - Math.floor(Date.now() / 1000);
+            if (left <= 0) {
+                timerEl.textContent = 'EXPIRED';
+                overlay.classList.add('lsg-gwo-expired');
+                overlay.classList.remove('lsg-gwo-urgent');
+            } else {
+                timerEl.textContent = left + 's';
+                overlay.classList.toggle('lsg-gwo-urgent', left <= 10);
+            }
+        }
+        if (pid && endTime) {
+            tick();
+            tickTimer = setInterval(tick, 1000);
+        }
+
+        // ---- Join button (attached / re-attached dynamically) ----
+        function attachJoin() {
+            var btn = document.getElementById('lsg-gwo-join-btn');
+            if (!btn) return;
+            btn.addEventListener('click', function(){
+                btn.disabled = true;
+                btn.textContent = '…';
+                var fd = new FormData();
+                fd.append('action',      'lsg_enter_giveaway');
+                fd.append('product_id',  pid);
+                fd.append('_ajax_nonce', nonce);
+                fetch(ajax, { method: 'POST', body: fd })
+                    .then(function(r){ return r.json(); })
+                    .then(function(r){
+                        if (r.success) {
+                            actionsEl.innerHTML = '<button class="lsg-gwo-btn lsg-gwo-btn-entered" disabled>\u2713 Entered!</button>';
+                        } else {
+                            alert(r.data || 'Could not enter giveaway.');
+                            btn.disabled = false;
+                            btn.textContent = '\uD83C\uDFDF Join Giveaway';
+                        }
+                    })
+                    .catch(function(){
+                        btn.disabled = false;
+                        btn.textContent = '\uD83C\uDFDF Join Giveaway';
+                    });
+            });
+        }
+        attachJoin();
+
+        // ---- Ably real-time updates ----
+        if (ablyKey) {
+            var s  = document.createElement('script');
+            s.src  = 'https://cdn.ably.com/lib/ably.min-1.js';
+            s.async = true;
+            s.onload = function() {
+                try {
+                    var ably = new Ably.Realtime(ablyKey);
+                    var ch   = ably.channels.get(ablyChan);
+
+                    ch.subscribe('giveaway-started', function(msg){
+                        var d = msg.data;
+                        if (!d || !d.product_id) return;
+                        pid     = parseInt(d.product_id, 10);
+                        endTime = parseInt(d.end_time,   10);
+                        overlay.dataset.pid = pid;
+                        overlay.dataset.end = endTime;
+                        overlay.classList.add('lsg-gwo-active');
+                        overlay.classList.remove('lsg-gwo-hidden', 'lsg-gwo-expired', 'lsg-gwo-urgent');
+                        timerEl.textContent = endTime - Math.floor(Date.now() / 1000) + 's';
+                        clearInterval(tickTimer);
+                        tickTimer = setInterval(tick, 1000);
+                        if (isLoggedIn) {
+                            actionsEl.innerHTML = '<button class="lsg-gwo-btn lsg-gwo-btn-join" id="lsg-gwo-join-btn">\uD83C\uDFDF Join Giveaway</button>';
+                            attachJoin();
+                        } else {
+                            actionsEl.innerHTML = '<a href="' + loginUrl + '" class="lsg-gwo-btn lsg-gwo-btn-login">\uD83D\uDD12 Login to Join</a>';
+                        }
+                    });
+
+                    ch.subscribe('giveaway-winner',  hideOverlay);
+                    ch.subscribe('giveaway-entered', function(msg){
+                        // no-op on overlay (grid handles entrant count)
+                    });
+
+                    function hideOverlay() {
+                        clearInterval(tickTimer);
+                        pid = 0; endTime = 0;
+                        overlay.classList.remove('lsg-gwo-active', 'lsg-gwo-urgent');
+                        overlay.classList.add('lsg-gwo-hidden');
+                        timerEl.textContent = '';
+                        actionsEl.innerHTML = '<span class="lsg-gwo-idle">Giveaway ended</span>';
+                    }
+
+                } catch(e) { console.warn('[LSG Overlay] Ably init failed:', e.message); }
+            };
+            document.head.appendChild(s);
+        }
+    })();
+    </script>
+    <?php
+    return ob_get_clean();
+}
+
+// ============================================================
 // [lsg_giveaway_timer product_id="X"]
 // ============================================================
 add_shortcode( 'lsg_giveaway_timer', 'lsg_giveaway_timer_shortcode' );
@@ -594,10 +796,6 @@ function lsg_home_products_shortcode( $atts ) : string {
                     <div class="lsg-product-card__price"><?php echo wp_kses_post( $product->get_price_html() ); ?></div>
 
                     <div class="lsg-product-card__actions">
-                        <a href="<?php echo esc_url( $permalink ); ?>" class="lsg-product-card__btn lsg-product-card__btn--view">
-                            <ion-icon name="eye-outline"></ion-icon>
-                            <span>View Details</span>
-                        </a>
                         <?php if ( $is_logged_in ) : ?>
                         <a href="<?php echo esc_url( $cart_url ); ?>" class="lsg-product-card__btn lsg-product-card__btn--cart">
                             <ion-icon name="cart-outline"></ion-icon>

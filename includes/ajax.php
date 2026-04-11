@@ -323,9 +323,9 @@ function lsg_ajax_start_auction() {
     if ( ! current_user_can( 'manage_woocommerce' ) ) wp_send_json_error( 'No permission.' );
 
     $pid      = absint( $_POST['product_id'] ?? 0 );
-    $duration = max( 1, (int) ( $_POST['duration'] ?? 5 ) );
+    $duration = max( 1, (int) ( $_POST['duration'] ?? 30 ) );
     $base     = (float) get_post_meta( $pid, 'lsg_auction_base_price', true );
-    $end_time = time() + $duration * 60;
+    $end_time = time() + $duration;
 
     update_post_meta( $pid, 'lsg_auction_status',          'running' );
     update_post_meta( $pid, 'lsg_auction_duration',        $duration );

@@ -232,7 +232,6 @@ function lsg_render_product_card( array $d ) : string {
             . ( $bidder ? ' <span class="lsg-bidder-name">by ' . $bidder . '</span>' : '' ) . '</div>'
             . $timer_html
             . '<div class="lsg-card-actions">' . $btn . '</div>'
-            . ( ! empty( $d['is_logged_in'] ) ? '<a href="' . esc_url( $d['product_url'] ) . '" class="lsg-card-details-link">View Details →</a>' : '' )
             . '</div>'
             . '</div>';
     }
@@ -297,7 +296,6 @@ function lsg_render_product_card( array $d ) : string {
             . '<div class="lsg-giveaway-entrants">👥 ' . esc_html( $entrants_count ) . ' entered</div>'
             . $timer_html
             . '<div class="lsg-card-actions">' . $btn . '</div>'
-            . ( ! empty( $d['is_logged_in'] ) ? '<a href="' . esc_url( $d['product_url'] ) . '" class="lsg-card-details-link">View Details →</a>' : '' )
             . '</div>'
             . '</div>';
     }
@@ -326,7 +324,6 @@ function lsg_render_product_card( array $d ) : string {
         . '<div class="lsg-card-price"><span class="lsg-price-text">' . wc_price( $d['price'] ) . '</span></div>'
         . '<div class="lsg-card-stock">Available: <span class="stock-count">' . esc_html( $d['available_stock'] ) . '</span></div>'
         . '<div class="lsg-card-actions">' . $btn . '</div>'
-        . ( ! empty( $d['is_logged_in'] ) ? '<a href="' . esc_url( $d['product_url'] ) . '" class="lsg-card-details-link">View Details →</a>' : '' )
         . '</div>'
         . '</div>';
 }
@@ -401,7 +398,7 @@ function lsg_render_admin_row( int $pid ) : string {
     if ( $is_auction ) {
         if ( $auction_status === 'idle' ) {
             $auction_html = '<div style="margin-top:6px;">'
-                . '<button class="button button-primary button-small lsg-start-auction-btn" data-id="' . $pid . '" data-duration="' . esc_attr( $auction_dur ) . '">▶ Start Auction (' . esc_html( $auction_dur ) . 'min)</button>'
+                . '<button class="button button-primary button-small lsg-start-auction-btn" data-id="' . $pid . '" data-duration="' . esc_attr( $auction_dur ) . '">▶ Start Auction (' . esc_html( $auction_dur ) . 's)</button>'
                 . '</div>';
         } elseif ( $auction_status === 'running' ) {
             $auction_html = '<div style="margin-top:6px;">'

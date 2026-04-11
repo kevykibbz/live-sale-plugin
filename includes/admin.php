@@ -367,7 +367,7 @@ function lsg_admin_products_tab() {
                 </label>
                 <div id="lsg_auction_wrap" style="display:none;background:#fef5e7;border-radius:8px;padding:12px;margin-top:-5px;">
                     <label>Base Price *<br><input type="number" name="auction_base_price" step="0.01" min="0" value="0" style="width:120px;"></label>
-                    <label style="margin-top:10px;display:block;">Auction Duration (minutes) *<br><input type="number" name="auction_duration" min="1" value="5" style="width:100px;"></label>
+                    <label style="margin-top:10px;display:block;">Auction Duration (seconds) *<br><input type="number" name="auction_duration" min="1" value="30" style="width:100px;"></label>
                 </div>
                 <button type="submit" class="button button-primary">Create Product</button>
             </form>
@@ -493,7 +493,7 @@ function lsg_admin_products_tab() {
         // Admin: Start Auction
         $(document).on('click', '.lsg-start-auction-btn', function(){
             var btn = $(this), pid = btn.data('id'), dur = parseInt(btn.data('duration'), 10);
-            if (!confirm('Start ' + dur + '-minute auction for this product?')) return;
+            if (!confirm('Start ' + dur + '-second auction for this product?')) return;
             btn.prop('disabled', true).text('Starting…');
             $.post(ajaxurl, { action: 'lsg_start_auction', product_id: pid, duration: dur, _ajax_nonce: saveNonce }, function(r){
                 if (r.success && r.data.html) { $('#product-row-' + pid).replaceWith(r.data.html); }
@@ -865,7 +865,7 @@ function lsg_handle_create_product() : bool {
 
         $is_auction       = ! empty( $_POST['is_auction'] ) ? 1 : 0;
         $auction_base     = max( 0, (float) ( $_POST['auction_base_price'] ?? 0 ) );
-        $auction_duration = max( 1, (int) ( $_POST['auction_duration'] ?? 5 ) );
+        $auction_duration = max( 1, (int) ( $_POST['auction_duration'] ?? 30 ) );
         update_post_meta( $pid, 'lsg_is_auction',          $is_auction );
         update_post_meta( $pid, 'lsg_auction_base_price',  $auction_base );
         update_post_meta( $pid, 'lsg_auction_duration',    $auction_duration );
