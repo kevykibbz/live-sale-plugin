@@ -58,6 +58,7 @@ function lsg_grid_shortcode( $atts ) : string {
 
     ob_start(); ?>
     <div id="lsg-notifications" style="position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;"></div>
+    <div id="lsg-ws-status" class="lsg-ws-connecting">&#9679; WebSocket connecting&hellip;</div>
     <div id="lsg-grid-wrap">
         <div id="lsg-grid">
             <?php
@@ -153,7 +154,7 @@ function lsg_chat_shortcode( $atts ) : string {
         'lsg-chat-js',
         plugin_dir_url( dirname( __FILE__ ) ) . 'js/livesale-chat.js',
         [ 'jquery' ],
-        '5.4',
+        '5.5',
         true
     );
 
@@ -175,6 +176,7 @@ function lsg_chat_shortcode( $atts ) : string {
         <div id="lsg-live-bar">
             <span class="lsg-live-pill">● LIVE</span>
             <span id="lsg-viewer-count">– viewers</span>
+            <span id="lsg-chat-ws-status" style="margin-left:auto;font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;background:#fef9e7;color:#7d6608;border:1px solid #f1c40f;">⧗ WS&hellip;</span>
         </div>
         <div id="lsg-chat-messages">
             <!-- skeleton loaders -->
@@ -212,7 +214,7 @@ function lsg_giveaway_overlay_shortcode( $atts ) : string {
         'lsg-grid',
         plugin_dir_url( dirname( __FILE__ ) ) . 'css/livesale-grid.css',
         [],
-        '5.3'
+        '5.4'
     );
 
     // Find the latest running giveaway in the live-sale category
@@ -672,13 +674,13 @@ function lsg_auction_widget_shortcode( $atts ) : string {
         'lsg-grid',
         plugin_dir_url( dirname( __FILE__ ) ) . 'css/livesale-grid.css',
         [],
-        '5.2'
+        '5.4'
     );
     wp_enqueue_script(
         'lsg-grid-js',
         plugin_dir_url( dirname( __FILE__ ) ) . 'js/livesale-grid.js',
         [ 'jquery' ],
-        '5.5',
+        '5.6',
         true
     );
     wp_localize_script( 'lsg-grid-js', 'lsgGrid', [

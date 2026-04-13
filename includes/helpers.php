@@ -91,3 +91,65 @@ function lsg_socketio_publish( string $channel_name, string $event, array $data 
         'blocking' => false, // fire-and-forget — don't block the response
     ] );
 }
+
+/**
+ * When a WordPress user is deleted, restore available stock for every
+ * Live Sale product they had claimed.
+ *
+ * Fires on both delete_user (before deletion) and wpmu_delete_user (Multisite).
+ * We hook delete_user (not deleted_user) so we can still read user meta if needed,
+ * though we store claimers by display_name/login in post meta, not user ID.
+ */
+add_action( 'delete_user', 'lsg_restore_stock_on_user_delete' );
+add_action( 'wpmu_delete_user', 'lsg_restore_stock_on_user_delete' );
+function lsg_restore_stock_on_user_delete( int $user_id ) : void {
+    $user = get_userdata( $user_id );
+    if ( ! $user ) return;
+
+    // Build the set of name variants the plugin may have stored
+    $name_variants = array_filter( array_unique( [
+        $user->display_name,
+        $user->user_login,
+    ] ) );
+
+    $cat_id = lsg_get_live_sale_category();
+    if ( ! $cat_id ) return;
+
+    $product_ids = get_posts( [
+        'post_type'      => 'product',
+        'posts_per_page' => -1,
+        'tax_query'      => [ [ 'taxonomy' => 'product_cat', 'field' => 'term_id', 'terms' => $cat_id ] ],
+        'fields'         => 'ids',
+    ] );
+
+    foreach ( $product_ids as $pid ) {
+        $claimed = get_post_meta( $pid, 'claimed_users', true ) ?: [];
+        $removed = 0;
+
+        foreach ( $name_variants as $variant ) {
+            $new_claimed = array_values( array_filter( $claimed, fn( $u ) => $u !== $variant ) );
+            $removed    += count( $claimed ) - count( $new_claimed );
+            $claimed     = $new_claimed;
+        }
+
+        if ( $removed === 0 ) continue;
+
+        update_post_meta( $pid, 'claimed_users', $claimed );
+        lsg_sync_short_description( $pid );
+
+        // Restore stock — cap at total WooCommerce stock quantity
+        $product     = wc_get_product( $pid );
+        $total_stock = $product ? (int) $product->get_stock_quantity() : PHP_INT_MAX;
+        $available   = (int) get_post_meta( $pid, 'available_stock', true );
+        $new_avail   = min( $total_stock, $available + $removed );
+        update_post_meta( $pid, 'available_stock', $new_avail );
+
+        lsg_increment_global_version();
+        update_post_meta( $pid, '_lsg_version', (int) get_post_meta( $pid, '_lsg_version', true ) + 1 );
+
+        lsg_socketio_publish( LSG_SOCKETIO_PRODUCT_CHANNEL, 'product-updated', [
+            'product_id' => $pid,
+            'available'  => $new_avail,
+        ] );
+    }
+}

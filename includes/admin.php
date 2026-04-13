@@ -402,6 +402,25 @@ function lsg_admin_products_tab() {
     <script>
     jQuery(function($){
         var saveNonce = '<?php echo wp_create_nonce( 'live_sale_update' ); ?>';
+        var summaryNonce = saveNonce; // same cap gate
+
+        // ── Refresh stat cards without a page reload ──────────────────
+        var summaryTimer = null;
+        function refreshSummary() {
+            clearTimeout(summaryTimer);
+            summaryTimer = setTimeout(function(){
+                $.post(ajaxurl, { action: 'lsg_get_admin_summary', _ajax_nonce: summaryNonce }, function(r){
+                    if (!r.success) return;
+                    var d = r.data;
+                    $('#lsg-stat-products').text(d.products);
+                    $('#lsg-stat-total-stock').text(d.total_stock);
+                    $('#lsg-stat-available').text(d.available);
+                    $('#lsg-stat-claims').text(d.claims);
+                    $('#lsg-stat-waitlisted').text(d.waitlisted);
+                    $('#lsg-stat-value').text(d.value);
+                });
+            }, 400); // debounce rapid sequential saves
+        }
         var timers = {};
 
         function showIndicator(input, ok) {
@@ -421,6 +440,7 @@ function lsg_admin_products_tab() {
                     showIndicator(input, r.success);
                     if (r.success && r.data && r.data.html) {
                         $('#product-row-' + pid).replaceWith(r.data.html);
+                        refreshSummary();
                     }
                 }).fail(function(){ showIndicator(input, false); });
             }, 500);
@@ -453,7 +473,7 @@ function lsg_admin_products_tab() {
             $.post(ajaxurl, { action: 'lsg_delete_product', product_id: pid, _ajax_nonce: n }, function(r){
                 if (r.success) {
                     btn.html('✓ Deleted').css('color','#006400');
-                    $('#product-row-' + pid).fadeOut(400, function(){ $(this).remove(); });
+                    $('#product-row-' + pid).fadeOut(400, function(){ $(this).remove(); refreshSummary(); });
                 } else {
                     alert('Could not delete product.');
                     btn.prop('disabled', false).html('🗑 Delete').css({'opacity':'1','cursor':'pointer'});
@@ -587,9 +607,10 @@ function lsg_admin_products_tab() {
                 try {
                     var socket = io(socketioUrl);
                     socket.emit('join', socketioChan);
-                    socket.on('product-updated',  function(d){ if (d && d.product_id) refreshAdminRow(d.product_id); });
-                    socket.on('giveaway-started', function(d){ if (d && d.product_id) refreshAdminRow(d.product_id); });
-                    socket.on('giveaway-winner',  function(d){ if (d && d.product_id) refreshAdminRow(d.product_id); });
+                    socket.on('product-updated',  function(d){ if (d && d.product_id) { refreshAdminRow(d.product_id); refreshSummary(); } });
+                    socket.on('giveaway-started', function(d){ if (d && d.product_id) { refreshAdminRow(d.product_id); refreshSummary(); } });
+                    socket.on('giveaway-winner',  function(d){ if (d && d.product_id) { refreshAdminRow(d.product_id); refreshSummary(); } });
+                    socket.on('product-deleted',  function(){ refreshSummary(); });
                 } catch(e) { console.warn('[LiveSale Admin] Socket.io init failed:', e.message); }
             };
             document.head.appendChild(s);
@@ -626,33 +647,101 @@ function lsg_admin_claimed_tab() {
         'orderby' => 'date', 'order' => 'DESC',
     ] );
 
-    echo '<h2 style="margin-top:20px;">Claimed Users</h2>';
-    echo '<table class="widefat striped"><thead><tr><th>Product</th><th>SKU</th><th>Price</th><th>Available</th><th>Claims</th><th>Claimed By</th></tr></thead><tbody>';
+    $remove_nonce = wp_create_nonce( 'live_sale_update' );
+    ?>
+    <h2 style="margin-top:20px;">Claimed Users</h2>
+    <table class="widefat striped" id="lsg-claimed-table">
+        <thead><tr><th>Product</th><th>SKU</th><th>Price</th><th>Available</th><th>Claims</th><th>Claimed By</th></tr></thead>
+        <tbody>
+        <?php
+        $found = false;
+        foreach ( $products as $p ) :
+            $claimed = get_post_meta( $p->ID, 'claimed_users', true ) ?: [];
+            $product = wc_get_product( $p->ID );
+            if ( ! $product ) continue;
+            $found     = true;
+            $available = (int) get_post_meta( $p->ID, 'available_stock', true );
+            $count     = count( $claimed );
 
-    $found = false;
-    foreach ( $products as $p ) {
-        $claimed = get_post_meta( $p->ID, 'claimed_users', true ) ?: [];
-        $product = wc_get_product( $p->ID );
-        if ( ! $product ) continue;
-        $found     = true;
-        $available = (int) get_post_meta( $p->ID, 'available_stock', true );
-        $count     = count( $claimed );
-        $users_html = $count
-            ? implode( ', ', array_map( 'esc_html', $claimed ) )
-            : '<em style="color:#999;">None yet</em>';
-        echo '<tr>'
-            . '<td><strong>' . esc_html( $product->get_name() ) . '</strong></td>'
-            . '<td><code>' . esc_html( $product->get_sku() ) . '</code></td>'
-            . '<td>' . wc_price( $product->get_price() ) . '</td>'
-            . '<td>' . esc_html( $available ) . '</td>'
-            . '<td><strong>' . esc_html( $count ) . '</strong></td>'
-            . '<td>' . $users_html . '</td>'
-            . '</tr>';
-    }
-    if ( ! $found ) {
-        echo '<tr><td colspan="6" style="text-align:center;color:#999;">No products found.</td></tr>';
-    }
-    echo '</tbody></table>';
+            $users_html = '';
+            if ( $count ) {
+                foreach ( $claimed as $username ) {
+                    $users_html .= '<span class="lsg-claimed-user" style="display:inline-flex;align-items:center;gap:4px;background:#f0f0f0;border-radius:4px;padding:2px 6px;margin:2px;">'
+                        . esc_html( $username )
+                        . '<button class="lsg-remove-claim" data-pid="' . esc_attr( $p->ID ) . '" data-user="' . esc_attr( $username ) . '" data-nonce="' . esc_attr( $remove_nonce ) . '" style="background:none;border:none;cursor:pointer;color:#c00;font-size:14px;line-height:1;padding:0 2px;" title="Remove claim">&times;</button>'
+                        . '</span>';
+                }
+            } else {
+                $users_html = '<em style="color:#999;">None yet</em>';
+            }
+
+            echo '<tr id="lsg-claimed-row-' . esc_attr( $p->ID ) . '">'
+                . '<td><strong>' . esc_html( $product->get_name() ) . '</strong></td>'
+                . '<td><code>' . esc_html( $product->get_sku() ) . '</code></td>'
+                . '<td>' . wc_price( $product->get_price() ) . '</td>'
+                . '<td class="lsg-avail-cell-' . esc_attr( $p->ID ) . '">' . esc_html( $available ) . '</td>'
+                . '<td class="lsg-count-cell-' . esc_attr( $p->ID ) . '"><strong>' . esc_html( $count ) . '</strong></td>'
+                . '<td class="lsg-users-cell-' . esc_attr( $p->ID ) . '">' . $users_html . '</td>'
+                . '</tr>';
+        endforeach;
+        if ( ! $found ) {
+            echo '<tr><td colspan="6" style="text-align:center;color:#999;">No products found.</td></tr>';
+        }
+        ?>
+        </tbody>
+    </table>
+    <p id="lsg-claimed-msg" style="display:none;"></p>
+
+    <script>
+    jQuery(function($){
+        $(document).on('click', '.lsg-remove-claim', function(){
+            var btn  = $(this);
+            var pid  = btn.data('pid');
+            var user = btn.data('user');
+            var n    = btn.data('nonce');
+
+            if (!confirm('Remove "' + user + '" from claimed users for this product? This will restore 1 unit of available stock.')) return;
+
+            btn.prop('disabled', true).html('⏳').css({'opacity':'1','color':'#888','cursor':'default'});
+            btn.closest('.lsg-claimed-user').css('opacity', '0.5');
+
+            $.post(ajaxurl, {
+                action:     'lsg_remove_single_claim',
+                product_id: pid,
+                username:   user,
+                _ajax_nonce: n
+            }, function(r) {
+                if (r.success) {
+                    var d = r.data;
+                    // Remove just this user badge
+                    btn.closest('.lsg-claimed-user').remove();
+
+                    // Update available + count cells inline
+                    $('.lsg-avail-cell-' + pid).text(d.available);
+                    $('.lsg-count-cell-' + pid).html('<strong>' + d.claim_count + '</strong>');
+
+                    // If no users left show placeholder
+                    var remaining = $('.lsg-users-cell-' + pid + ' .lsg-claimed-user');
+                    if (remaining.length === 0) {
+                        $('.lsg-users-cell-' + pid).html('<em style="color:#999;">None yet</em>');
+                    }
+
+                    // Flash summary stat cards if visible
+                    if (typeof refreshSummary === 'function') refreshSummary();
+                } else {
+                    alert('Error: ' + (r.data || 'Could not remove claim.'));
+                    btn.prop('disabled', false).html('&times;').css({'opacity':'1','color':'#c00','cursor':'pointer'});
+                    btn.closest('.lsg-claimed-user').css('opacity', '1');
+                }
+            }).fail(function(){
+                alert('Network error.');
+                btn.prop('disabled', false).html('&times;').css({'opacity':'1','color':'#c00','cursor':'pointer'});
+                btn.closest('.lsg-claimed-user').css('opacity', '1');
+            });
+        });
+    });
+    </script>
+    <?php
 }
 
 // ============================================================
@@ -796,19 +885,19 @@ function lsg_render_admin_summary() : void {
         }
     }
     ?>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin:20px 0;">
+    <div id="lsg-summary-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin:20px 0;">
         <?php foreach ( [
-            [ '📦', $total_products,                                   'Products' ],
-            [ '📊', $total_stock,                                      'Total Stock' ],
-            [ '✅', $available_stock_sum,                              'Available' ],
-            [ '👥', $total_claims,                                     'Claims' ],
-            [ '⏳', $total_waitlisted,                                  'Waitlisted' ],
-            [ '💰', strip_tags( wc_price( $total_claimed_value ) ),    'Total Claimed Value' ],
+            [ '📦', $total_products,                                'Products',           'lsg-stat-products'    ],
+            [ '📊', $total_stock,                                   'Total Stock',        'lsg-stat-total-stock' ],
+            [ '✅', $available_stock_sum,                           'Available',          'lsg-stat-available'   ],
+            [ '👥', $total_claims,                                  'Claims',             'lsg-stat-claims'      ],
+            [ '⏳', $total_waitlisted,                              'Waitlisted',         'lsg-stat-waitlisted'  ],
+            [ '💰', strip_tags( wc_price( $total_claimed_value ) ), 'Total Claimed Value','lsg-stat-value'       ],
         ] as $card ) : ?>
         <div style="background:#fff;border-radius:10px;padding:18px;box-shadow:0 2px 6px rgba(0,0,0,.07);display:flex;align-items:center;gap:12px;">
             <span style="font-size:28px;"><?php echo $card[0]; ?></span>
             <div>
-                <div style="font-size:<?php echo $card[2] === 'Total Claimed Value' ? '16px' : '22px'; ?>;font-weight:700;color:#00483e;"><?php echo esc_html( $card[1] ); ?></div>
+                <div id="<?php echo esc_attr( $card[3] ); ?>" style="font-size:<?php echo $card[2] === 'Total Claimed Value' ? '16px' : '22px'; ?>;font-weight:700;color:#00483e;"><?php echo esc_html( $card[1] ); ?></div>
                 <div style="color:#777;font-size:12px;"><?php echo esc_html( $card[2] ); ?></div>
             </div>
         </div>

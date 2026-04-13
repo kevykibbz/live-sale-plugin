@@ -1,5 +1,5 @@
 ﻿/* ================================================================
-   Live Sale - Product Grid Styles  v5.3  (Botiga-aligned)
+   Live Sale - Product Grid Styles  v5.4  (Botiga-aligned)
    Colours + layout via CSS custom properties.
    Buttons automatically adopt --bt-border-radius-button from Botiga.
    ================================================================ */
@@ -228,6 +228,33 @@
     opacity: .8;
 }
 .lsg-card-details-link:hover { opacity: 1; text-decoration: underline; }
+
+/* ── WebSocket Status Badge ─────────────────────────────────── */
+#lsg-ws-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 20px;
+    margin-bottom: 10px;
+    border: 1px solid;
+    transition: background .3s, color .3s, border-color .3s;
+    font-family: var(--lsg-font);
+}
+#lsg-ws-status.lsg-ws-connecting {
+    background: #fef9e7; color: #7d6608; border-color: #f1c40f;
+}
+#lsg-ws-status.lsg-ws-connected {
+    background: #eafaf1; color: #1a5c38; border-color: #27ae60;
+}
+#lsg-ws-status.lsg-ws-polling {
+    background: #fdf2e9; color: #784212; border-color: #e67e22;
+}
+#lsg-ws-status.lsg-ws-error {
+    background: #fdf2f2; color: #7b1e1e; border-color: var(--lsg-auction);
+}
 
 /* ── Notifications ──────────────────────────────────────────── */
 .lsg-notif {

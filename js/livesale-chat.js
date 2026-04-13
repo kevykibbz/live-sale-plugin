@@ -167,39 +167,84 @@ jQuery(function($){
     $('#lsg-chat-send').on('click', sendMsg);
     $('#lsg-chat-input').on('keypress', function(e){ if (e.which===13) sendMsg(); });
 
+    // ── WebSocket status indicator (in live bar) ─────────────
+    function setChatWsStatus(state) {
+        var el = document.getElementById('lsg-chat-ws-status');
+        if (!el) return;
+        var styles = {
+            connecting: 'background:#fef9e7;color:#7d6608;border-color:#f1c40f',
+            connected:  'background:#eafaf1;color:#1a5c38;border-color:#27ae60',
+            polling:    'background:#fdf2e9;color:#784212;border-color:#e67e22',
+            error:      'background:#fdf2f2;color:#7b1e1e;border-color:#c0392b'
+        };
+        var labels = {
+            connecting: '&#9679; WS&hellip;',
+            connected:  '&#9679; WebSocket',
+            polling:    '&#9679; Polling',
+            error:      '&#9679; WS Error'
+        };
+        el.style.cssText = 'margin-left:auto;font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;border:1px solid;' + (styles[state] || '');
+        el.innerHTML = labels[state] || state;
+        console.log('[LiveSale Chat] WS status:', state);
+    }
+
     showSkeletons();
     var chatPollInterval = setInterval(loadChat, 4000); // fallback polling — cancelled when Socket.io connects
     loadChat();
 
     // Load Socket.io client non-blocking
     if (SOCKETIO_URL) {
+        console.log('[LiveSale Chat] Socket.io URL:', SOCKETIO_URL);
+        setChatWsStatus('connecting');
         var socketioScript = document.createElement('script');
         socketioScript.src = SOCKETIO_URL + '/socket.io/socket.io.js';
         socketioScript.async = true;
         socketioScript.onload = function() {
             try {
-                var socket = io(SOCKETIO_URL);
+                var socket = io(SOCKETIO_URL, { transports: ['websocket', 'polling'] });
                 socket.emit('join', SOCKETIO_CHANNEL);
 
                 socket.on('new-message', function(){ loadChat(); });
 
-                // Once Socket.io is connected, drop frequent polling to a slow heartbeat
                 socket.on('connect', function() {
+                    var transport = socket.io.engine.transport.name;
+                    console.log('[LiveSale Chat] Socket.io connected via', transport, '| id:', socket.id);
+                    setChatWsStatus(transport === 'websocket' ? 'connected' : 'polling');
                     clearInterval(chatPollInterval);
-                    chatPollInterval = setInterval(loadChat, 30000); // 30-second heartbeat fallback
+                    chatPollInterval = setInterval(loadChat, 30000);
+                });
+
+                socket.on('upgrade', function() {
+                    var transport = socket.io.engine.transport.name;
+                    console.log('[LiveSale Chat] Socket.io upgraded to', transport);
+                    setChatWsStatus(transport === 'websocket' ? 'connected' : 'polling');
                 });
 
                 // If Socket.io disconnects, restore fast polling so chat stays live
-                socket.on('disconnect', function() {
+                socket.on('disconnect', function(reason) {
+                    console.warn('[LiveSale Chat] Socket.io disconnected:', reason);
+                    setChatWsStatus('polling');
                     clearInterval(chatPollInterval);
                     chatPollInterval = setInterval(loadChat, 4000);
                 });
+
+                socket.on('connect_error', function(err) {
+                    console.error('[LiveSale Chat] Socket.io connection error:', err.message);
+                    setChatWsStatus('error');
+                });
+
                 socket.on('reconnect', function() {
                     clearInterval(chatPollInterval);
                     chatPollInterval = setInterval(loadChat, 30000);
                 });
-            } catch(e) { console.warn('[LiveSale Chat] Socket.io init failed:', e.message); }
+            } catch(e) { console.warn('[LiveSale Chat] Socket.io init failed:', e.message); setChatWsStatus('error'); }
+        };
+        socketioScript.onerror = function() {
+            console.error('[LiveSale Chat] Failed to load socket.io.js from', SOCKETIO_URL);
+            setChatWsStatus('error');
         };
         document.head.appendChild(socketioScript);
+    } else {
+        console.warn('[LiveSale Chat] No SOCKETIO_URL configured — polling only.');
     }
 });

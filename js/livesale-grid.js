@@ -5,6 +5,22 @@
     var SOCKETIO_URL     = lsgGrid.socketio_url;
     var SOCKETIO_CHANNEL = lsgGrid.socketio_channel;
 
+    // ── Auto nonce refresh on 403 ─────────────────────────────
+    var _nonceRefreshing = false;
+    $(document).ajaxError(function(event, jqXHR, settings, err) {
+        if (jqXHR.status === 403 && !_nonceRefreshing) {
+            _nonceRefreshing = true;
+            console.warn('[LiveSale Grid] 403 detected — refreshing nonce…');
+            $.get(AJAX, { action: 'lsg_refresh_nonce' }, function(r) {
+                if (r && r.success) {
+                    NONCE = r.data.nonce;
+                    console.log('[LiveSale Grid] Nonce refreshed.');
+                }
+                _nonceRefreshing = false;
+            }).fail(function() { _nonceRefreshing = false; });
+        }
+    });
+
     // Track which product IDs have already had winner rolled this session.
     // Stored outside DOM so the flag survives refreshCard() replacing the element.
     var rolledProductIds = {};
@@ -32,11 +48,16 @@
         $('#lsg-grid').html(skeletons);
     }
 
+    var gridInitialised = false;
+
     function loadGrid() {
-        showSkeletons(4);
+        if (!gridInitialised) {
+            showSkeletons(4); // only on first load — never wipe existing cards with skeletons
+        }
         $.get(AJAX, { action: 'lsg_get_products', _ajax_nonce: NONCE }, function(r){
             if (r.success) {
                 $('#lsg-grid').html(r.data.html);
+                gridInitialised = true;
                 updateTimers();
             } else {
                 $('#lsg-grid').html('<p>Could not load products.</p>');
@@ -196,6 +217,21 @@
     // Track when Socket.io last handled an update to avoid double-rendering
     var lastSocketUpdate = 0;
 
+    // ── WebSocket status indicator ────────────────────────────
+    function setWsStatus(state) {
+        var el = document.getElementById('lsg-ws-status');
+        if (!el) return;
+        el.className = 'lsg-ws-' + state;
+        var labels = {
+            connecting: '&#9679; WebSocket connecting&hellip;',
+            connected:  '&#9679; WebSocket Live &#10003;',
+            polling:    '&#9679; Polling mode (WebSocket offline)',
+            error:      '&#9679; WebSocket error &mdash; using polling'
+        };
+        el.innerHTML = labels[state] || state;
+        console.log('[LiveSale Grid] WS status:', state);
+    }
+
     // Version polling fallback — catches any real-time events Socket.io may have missed.
     // Polls a lightweight version endpoint every 8 seconds; reloads grid only when version advances.
     var knownVersion = lsgGrid.init_version || 0;
@@ -213,17 +249,51 @@
 
     // Load Socket.io client non-blocking
     if (SOCKETIO_URL) {
+        console.log('[LiveSale Grid] Socket.io URL:', SOCKETIO_URL);
+        setWsStatus('connecting');
         var socketioScript = document.createElement('script');
         socketioScript.src = SOCKETIO_URL + '/socket.io/socket.io.js';
         socketioScript.async = true;
         socketioScript.onload = function() {
             try {
-                var socket = io(SOCKETIO_URL);
+                var socket = io(SOCKETIO_URL, { transports: ['websocket', 'polling'] });
                 socket.emit('join', SOCKETIO_CHANNEL);
+
+                socket.on('connect', function() {
+                    var transport = socket.io.engine.transport.name;
+                    console.log('[LiveSale Grid] Socket.io connected via', transport, '| id:', socket.id);
+                    setWsStatus(transport === 'websocket' ? 'connected' : 'polling');
+                });
+
+                socket.on('disconnect', function(reason) {
+                    console.warn('[LiveSale Grid] Socket.io disconnected:', reason);
+                    setWsStatus('polling');
+                });
+
+                socket.on('connect_error', function(err) {
+                    console.error('[LiveSale Grid] Socket.io connection error:', err.message);
+                    setWsStatus('error');
+                });
+
+                socket.on('upgrade', function() {
+                    var transport = socket.io.engine.transport.name;
+                    console.log('[LiveSale Grid] Socket.io upgraded to', transport);
+                    setWsStatus(transport === 'websocket' ? 'connected' : 'polling');
+                });
 
                 socket.on('product-updated', function(data){
                     lastSocketUpdate = Date.now();
                     if (data && data.product_id) {
+                        var transport = socket.io.engine.transport.name;
+                        if (data.claimed_by) {
+                            console.log(
+                                '%c[LiveSale] ⚡ WebSocket (' + transport + ') → product-updated | product #' + data.product_id +
+                                ' claimed by "' + data.claimed_by + '" | stock left: ' + data.available,
+                                'color:#27ae60;font-weight:bold'
+                            );
+                        } else {
+                            console.log('[LiveSale] ⚡ WebSocket (' + transport + ') → product-updated | product #' + data.product_id);
+                        }
                         refreshCard(data.product_id);
                         // Skip notification if this user triggered the event (they already got an AJAX toast)
                         if (data.notification && data.claimer !== USERNAME) {
@@ -279,9 +349,16 @@
                         refreshCard(data.product_id);
                     }
                 });
-            } catch(e) { console.warn('[LiveSale] Socket.io init failed:', e.message); }
+            } catch(e) { console.warn('[LiveSale] Socket.io init failed:', e.message); setWsStatus('error'); }
+        };
+        socketioScript.onerror = function() {
+            console.error('[LiveSale Grid] Failed to load socket.io.js from', SOCKETIO_URL);
+            setWsStatus('error');
         };
         document.head.appendChild(socketioScript);
+    } else {
+        console.warn('[LiveSale Grid] No SOCKETIO_URL configured — running in polling-only mode.');
+        setWsStatus('polling');
     }
 
 })(jQuery);

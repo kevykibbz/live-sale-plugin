@@ -16,8 +16,62 @@ function lsg_current_username() : string {
 }
 
 // ============================================================
+// Nonce refresh — called by JS when a nonce-expired 403 is detected.
+// Returns fresh nonces so the user doesn't have to reload the page.
+// ============================================================
+add_action( 'wp_ajax_lsg_refresh_nonce',        'lsg_ajax_refresh_nonce' );
+add_action( 'wp_ajax_nopriv_lsg_refresh_nonce', 'lsg_ajax_refresh_nonce' );
+function lsg_ajax_refresh_nonce() {
+    wp_send_json_success( [
+        'nonce'      => wp_create_nonce( 'lsg_actions' ),
+        'chat_nonce' => wp_create_nonce( 'lsg_chat' ),
+    ] );
+}
+
+// ============================================================
 // Product grid AJAX
 // ============================================================
+
+// ── Admin summary stats (for real-time stat card updates) ──────────────────
+add_action( 'wp_ajax_lsg_get_admin_summary', 'lsg_ajax_get_admin_summary' );
+function lsg_ajax_get_admin_summary() {
+    check_ajax_referer( 'live_sale_update', '_ajax_nonce' );
+    if ( ! current_user_can( 'manage_woocommerce' ) ) wp_send_json_error( 'No permission.' );
+
+    $cat_id = lsg_get_live_sale_category();
+    $total_products = $total_stock = $available_stock_sum = $total_claims = $total_waitlisted = 0;
+    $total_claimed_value = 0.0;
+
+    if ( $cat_id ) {
+        $ids = get_posts( [
+            'post_type'      => 'product',
+            'posts_per_page' => -1,
+            'tax_query'      => [ [ 'taxonomy' => 'product_cat', 'field' => 'term_id', 'terms' => $cat_id ] ],
+            'fields'         => 'ids',
+        ] );
+        $total_products = count( $ids );
+        foreach ( $ids as $pid ) {
+            $product = wc_get_product( $pid );
+            if ( ! $product ) continue;
+            $total_stock         += max( 0, (int) $product->get_stock_quantity() );
+            $available_stock_sum += max( 0, (int) get_post_meta( $pid, 'available_stock', true ) );
+            $claimed              = get_post_meta( $pid, 'claimed_users', true ) ?: [];
+            $claim_count          = count( $claimed );
+            $total_claims        += $claim_count;
+            $total_waitlisted    += count( get_post_meta( $pid, 'lsg_waitlist', true ) ?: [] );
+            $total_claimed_value += (float) $product->get_price() * $claim_count;
+        }
+    }
+
+    wp_send_json_success( [
+        'products'    => $total_products,
+        'total_stock' => $total_stock,
+        'available'   => $available_stock_sum,
+        'claims'      => $total_claims,
+        'waitlisted'  => $total_waitlisted,
+        'value'       => html_entity_decode( strip_tags( wc_price( $total_claimed_value ) ), ENT_QUOTES | ENT_HTML5, 'UTF-8' ),
+    ] );
+}
 
 add_action( 'wp_ajax_lsg_get_products',        'lsg_ajax_get_products' );
 add_action( 'wp_ajax_nopriv_lsg_get_products', 'lsg_ajax_get_products' );
@@ -442,7 +496,22 @@ add_action( 'wp_ajax_lsg_update_total_stock', function () {
     $product->set_stock_quantity( $stock );
     $product->set_stock_status( $stock > 0 ? 'instock' : 'outofstock' );
     $product->save();
+
+    // Clamp available_stock so it never exceeds total stock
+    $available = (int) get_post_meta( $pid, 'available_stock', true );
+    if ( $available > $stock ) {
+        update_post_meta( $pid, 'available_stock', $stock );
+        $available = $stock;
+    }
+
     lsg_increment_global_version();
+    update_post_meta( $pid, '_lsg_version', (int) get_post_meta( $pid, '_lsg_version', true ) + 1 );
+
+    lsg_socketio_publish( LSG_SOCKETIO_PRODUCT_CHANNEL, 'product-updated', [
+        'product_id' => $pid,
+        'available'  => $available,
+    ] );
+
     wp_send_json_success( [ 'html' => lsg_render_admin_row( $pid ) ] );
 } );
 
@@ -452,18 +521,87 @@ add_action( 'wp_ajax_lsg_update_available_stock', function () {
     $stock = max( 0, (int) ( $_POST['value'] ?? 0 ) );
     update_post_meta( $pid, 'available_stock', $stock );
     lsg_increment_global_version();
+    update_post_meta( $pid, '_lsg_version', (int) get_post_meta( $pid, '_lsg_version', true ) + 1 );
+
+    lsg_socketio_publish( LSG_SOCKETIO_PRODUCT_CHANNEL, 'product-updated', [
+        'product_id' => $pid,
+        'available'  => $stock,
+    ] );
+
     wp_send_json_success( [ 'html' => lsg_render_admin_row( $pid ) ] );
+} );
+
+// ── Remove a single user from claimed list (Claimed Users tab) ─────────────
+add_action( 'wp_ajax_lsg_remove_single_claim', function () {
+    _lsg_update_guard();
+    $pid      = absint( $_POST['product_id'] ?? 0 );
+    $username = sanitize_text_field( wp_unslash( $_POST['username'] ?? '' ) );
+    if ( ! $pid || ! $username ) wp_send_json_error( 'Invalid request.' );
+
+    $claimed = get_post_meta( $pid, 'claimed_users', true ) ?: [];
+    $new_claimed = array_values( array_filter( $claimed, fn( $u ) => $u !== $username ) );
+
+    if ( count( $new_claimed ) === count( $claimed ) ) {
+        wp_send_json_error( 'User not found in claimed list.' );
+    }
+
+    update_post_meta( $pid, 'claimed_users', $new_claimed );
+    lsg_sync_short_description( $pid );
+
+    // Restore 1 unit of available stock (capped at total stock)
+    $product     = wc_get_product( $pid );
+    $total_stock = $product ? (int) $product->get_stock_quantity() : PHP_INT_MAX;
+    $available   = (int) get_post_meta( $pid, 'available_stock', true );
+    $new_avail   = min( $total_stock, $available + 1 );
+    update_post_meta( $pid, 'available_stock', $new_avail );
+
+    lsg_increment_global_version();
+    update_post_meta( $pid, '_lsg_version', (int) get_post_meta( $pid, '_lsg_version', true ) + 1 );
+
+    lsg_socketio_publish( LSG_SOCKETIO_PRODUCT_CHANNEL, 'product-updated', [
+        'product_id' => $pid,
+        'available'  => $new_avail,
+    ] );
+
+    wp_send_json_success( [
+        'available'   => $new_avail,
+        'claim_count' => count( $new_claimed ),
+    ] );
 } );
 
 add_action( 'wp_ajax_lsg_update_claimed_users', function () {
     _lsg_update_guard();
     $pid   = absint( $_POST['product_id'] ?? 0 );
     $raw   = sanitize_text_field( $_POST['value'] ?? '' );
-    $users = array_map( 'trim', explode( ',', $raw ) );
-    $users = array_filter( array_unique( $users ) );
-    update_post_meta( $pid, 'claimed_users', array_values( $users ) );
+
+    // Parse new list (empty string → empty array)
+    $new_users = $raw !== '' ? array_values( array_filter( array_unique( array_map( 'trim', explode( ',', $raw ) ) ) ) ) : [];
+
+    // Diff against the old list to adjust available stock
+    $old_users       = get_post_meta( $pid, 'claimed_users', true ) ?: [];
+    $old_count       = count( $old_users );
+    $new_count       = count( $new_users );
+    $delta           = $old_count - $new_count; // positive = users removed, negative = users added
+
+    if ( $delta !== 0 ) {
+        $product         = wc_get_product( $pid );
+        $total_stock     = $product ? (int) $product->get_stock_quantity() : PHP_INT_MAX;
+        $available       = (int) get_post_meta( $pid, 'available_stock', true );
+        $new_available   = max( 0, min( $total_stock, $available + $delta ) );
+        update_post_meta( $pid, 'available_stock', $new_available );
+    }
+
+    update_post_meta( $pid, 'claimed_users', $new_users );
     lsg_sync_short_description( $pid );
     lsg_increment_global_version();
+    update_post_meta( $pid, '_lsg_version', (int) get_post_meta( $pid, '_lsg_version', true ) + 1 );
+
+    $available_now = (int) get_post_meta( $pid, 'available_stock', true );
+    lsg_socketio_publish( LSG_SOCKETIO_PRODUCT_CHANNEL, 'product-updated', [
+        'product_id' => $pid,
+        'available'  => $available_now,
+    ] );
+
     wp_send_json_success( [ 'html' => lsg_render_admin_row( $pid ) ] );
 } );
 
