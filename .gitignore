@@ -1,6 +1,7 @@
 # Dependencies
 vendor/
 composer.lock
+server/node_modules/
 
 # IDE / OS
 .DS_Store
