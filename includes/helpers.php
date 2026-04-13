@@ -7,13 +7,13 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-// ── Async cron: broadcast giveaway winner via Ably ─────────
+// ── Async cron: broadcast giveaway winner via Socket.io ─────────────
 // Scheduled by lsg_do_roll_winner(); runs out-of-band so the
 // request that triggered the roll is not blocked.
 add_action( 'lsg_async_winner_broadcast', function ( int $pid ) {
     $product = wc_get_product( $pid );
     $winner  = (string) get_post_meta( $pid, 'lsg_giveaway_winner', true );
-    lsg_ably_publish( ABLY_PRODUCT_CHANNEL, 'giveaway-winner', [
+    lsg_socketio_publish( LSG_SOCKETIO_PRODUCT_CHANNEL, 'giveaway-winner', [
         'product_id' => $pid,
         'name'       => $product ? $product->get_name() : '',
         'winner'     => $winner ?: 'No entrants',
@@ -63,25 +63,31 @@ function lsg_increment_global_version() : void {
 }
 
 /**
- * Publish a message to an Ably channel (fire-and-forget).
+ * Publish a message to all Socket.io clients in a channel (fire-and-forget).
  *
- * The Ably\AblyRest class is loaded at runtime from the ably-php library;
- * it is not available at static-analysis time, so we instantiate via a
- * variable class name to avoid IDE "Undefined type" warnings.
+ * Calls the POST /emit endpoint on the self-hosted Node.js Socket.io server.
+ * Configure the server URL and shared secret in wp-config.php:
+ *   define( 'LSG_SOCKETIO_URL',    'https://your-droplet:3000' );
+ *   define( 'LSG_SOCKETIO_SECRET', 'your_shared_secret_here' );
  *
  * @param string $channel_name
  * @param string $event
  * @param array  $data
  */
-function lsg_ably_publish( string $channel_name, string $event, array $data ) : void {
-    if ( defined( 'ABLY_DISABLED' ) || ! class_exists( 'Ably\AblyRest' ) ) return;
-    try {
-        $ably_class = '\\Ably\\AblyRest';
-        /** @var object $ably */
-        $ably = new $ably_class( ABLY_API_KEY );
-        $ch   = $ably->channel( $channel_name );
-        $ch->publish( $event, $data );
-    } catch ( Exception $e ) {
-        error_log( '[LSG Ably] ' . $e->getMessage() );
-    }
+function lsg_socketio_publish( string $channel_name, string $event, array $data ) : void {
+    $url    = LSG_SOCKETIO_URL;
+    $secret = LSG_SOCKETIO_SECRET;
+    if ( ! $url || ! $secret ) return;
+
+    wp_remote_post( rtrim( $url, '/' ) . '/emit', [
+        'headers'  => [ 'Content-Type' => 'application/json' ],
+        'body'     => wp_json_encode( [
+            'channel' => $channel_name,
+            'event'   => $event,
+            'data'    => $data,
+            'secret'  => $secret,
+        ] ),
+        'timeout'  => 5,
+        'blocking' => false, // fire-and-forget — don't block the response
+    ] );
 }

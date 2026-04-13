@@ -1,9 +1,13 @@
 (function($){
-    var AJAX     = lsgGrid.ajax;
-    var NONCE    = lsgGrid.nonce;
-    var USERNAME = lsgGrid.username || '';
-    var ABLY_KEY     = lsgGrid.ably_key;
-    var ABLY_CHANNEL = lsgGrid.ably_channel;
+    var AJAX         = lsgGrid.ajax;
+    var NONCE        = lsgGrid.nonce;
+    var USERNAME     = lsgGrid.username || '';
+    var SOCKETIO_URL     = lsgGrid.socketio_url;
+    var SOCKETIO_CHANNEL = lsgGrid.socketio_channel;
+
+    // Track which product IDs have already had winner rolled this session.
+    // Stored outside DOM so the flag survives refreshCard() replacing the element.
+    var rolledProductIds = {};
 
     function notify(msg, type) {
         type = type || 'info';
@@ -161,8 +165,8 @@
             
             if (left <= 0) {
                 el.find('.lsg-timer-count').text('00:00');
-                if (!el.data('rolled')) {
-                    el.data('rolled', true);
+                if (!rolledProductIds[pid]) {
+                    rolledProductIds[pid] = true;
                     $.post(AJAX, { action: 'lsg_auto_roll_winner', product_id: pid, _ajax_nonce: NONCE }, function(r){
                         if (r.success && r.data && r.data.winner) {
                             if (USERNAME && r.data.winner === USERNAME) {
@@ -189,78 +193,95 @@
     // Load grid immediately
     loadGrid();
 
-    // Version polling fallback — catches any real-time events Ably may have missed.
+    // Track when Socket.io last handled an update to avoid double-rendering
+    var lastSocketUpdate = 0;
+
+    // Version polling fallback — catches any real-time events Socket.io may have missed.
     // Polls a lightweight version endpoint every 8 seconds; reloads grid only when version advances.
     var knownVersion = lsgGrid.init_version || 0;
     setInterval(function(){
         $.get(AJAX, { action: 'lsg_get_global_version', _ajax_nonce: NONCE }, function(r){
             if (r.success && r.data.version > knownVersion) {
                 knownVersion = r.data.version;
-                loadGrid();
+                // Skip reload if Socket.io already handled an update in the last 10 seconds
+                if (Date.now() - lastSocketUpdate > 10000) {
+                    loadGrid();
+                }
             }
         });
     }, 8000);
 
-    // Load Ably non-blocking
-    var ablyScript = document.createElement('script');
-    ablyScript.src = 'https://cdn.ably.com/lib/ably.min-1.js';
-    ablyScript.async = true;
-    ablyScript.onload = function() {
-        try {
-            var ably = new Ably.Realtime(ABLY_KEY);
-            var ch   = ably.channels.get(ABLY_CHANNEL);
-            ch.subscribe('product-updated', function(msg){
-                if (msg.data && msg.data.product_id) {
-                    refreshCard(msg.data.product_id);
-                    // Skip notification if this user triggered the event (they already got an AJAX toast)
-                    if (msg.data.notification && msg.data.claimer !== USERNAME) {
-                        notify(msg.data.notification, msg.data.notif_type || 'info');
+    // Load Socket.io client non-blocking
+    if (SOCKETIO_URL) {
+        var socketioScript = document.createElement('script');
+        socketioScript.src = SOCKETIO_URL + '/socket.io/socket.io.js';
+        socketioScript.async = true;
+        socketioScript.onload = function() {
+            try {
+                var socket = io(SOCKETIO_URL);
+                socket.emit('join', SOCKETIO_CHANNEL);
+
+                socket.on('product-updated', function(data){
+                    lastSocketUpdate = Date.now();
+                    if (data && data.product_id) {
+                        refreshCard(data.product_id);
+                        // Skip notification if this user triggered the event (they already got an AJAX toast)
+                        if (data.notification && data.claimer !== USERNAME) {
+                            notify(data.notification, data.notif_type || 'info');
+                        }
                     }
-                }
-            });
-            ch.subscribe('new_product', function(){ loadGrid(); });
-            ch.subscribe('giveaway-started', function(msg){
-                if (msg.data && msg.data.product_id) {
-                    notify('\uD83C\uDF81 Giveaway started for ' + (msg.data.name || 'a product') + '!', 'info');
-                    refreshCard(msg.data.product_id);
-                }
-            });
-            ch.subscribe('giveaway-restarted', function(msg){
-                if (msg.data && msg.data.product_id) {
-                    var count = msg.data.restart_count || 1;
-                    notify('\uD83D\uDD04 Giveaway extended ×' + count + ' — No entries yet!', 'warning');
-                    refreshCard(msg.data.product_id);
-                }
-            });
-            ch.subscribe('giveaway-winner', function(msg){
-                if (msg.data && msg.data.product_id) {
-                    if (USERNAME && msg.data.winner === USERNAME) {
-                        notify('\uD83C\uDF89 You Won the giveaway!', 'success');
-                    } else {
-                        notify('\uD83C\uDFC6 Winner: ' + msg.data.winner + '!', 'info');
+                });
+                socket.on('new_product', function(){
+                    lastSocketUpdate = Date.now();
+                    loadGrid();
+                });
+                socket.on('giveaway-started', function(data){
+                    lastSocketUpdate = Date.now();
+                    if (data && data.product_id) {
+                        notify('\uD83C\uDF81 Giveaway started for ' + (data.name || 'a product') + '!', 'info');
+                        refreshCard(data.product_id);
                     }
-                    refreshCard(msg.data.product_id);
-                }
-            });
-            ch.subscribe('auction-started', function(msg){
-                if (msg.data && msg.data.product_id) {
-                    notify('\uD83D\uDD28 Auction started for ' + (msg.data.name || 'a product') + '!', 'info');
-                    refreshCard(msg.data.product_id);
-                }
-            });
-            ch.subscribe('auction-bid', function(msg){
-                if (msg.data && msg.data.product_id) {
-                    var bidMsg = '\uD83D\uDD28 ' + msg.data.bidder + ' bid ' + msg.data.bid;
-                    if (USERNAME && msg.data.bidder === USERNAME) {
-                        notify('Your bid placed: ' + msg.data.bid, 'success');
-                    } else {
-                        notify(bidMsg, 'info');
+                });
+                socket.on('giveaway-restarted', function(data){
+                    lastSocketUpdate = Date.now();
+                    if (data && data.product_id) {
+                        var count = data.restart_count || 1;
+                        notify('\uD83D\uDD04 Giveaway extended \xD7' + count + ' \u2014 No entries yet!', 'warning');
+                        refreshCard(data.product_id);
                     }
-                    refreshCard(msg.data.product_id);
-                }
-            });
-        } catch(e) { console.warn('[LiveSale] Ably init failed:', e.message); }
-    };
-    document.head.appendChild(ablyScript);
+                });
+                socket.on('giveaway-winner', function(data){
+                    lastSocketUpdate = Date.now();
+                    if (data && data.product_id) {
+                        if (USERNAME && data.winner === USERNAME) {
+                            notify('\uD83C\uDF89 You Won the giveaway!', 'success');
+                        } else {
+                            notify('\uD83C\uDFC6 Winner: ' + data.winner + '!', 'info');
+                        }
+                        refreshCard(data.product_id);
+                    }
+                });
+                socket.on('auction-started', function(data){
+                    lastSocketUpdate = Date.now();
+                    if (data && data.product_id) {
+                        notify('\uD83D\uDD28 Auction started for ' + (data.name || 'a product') + '!', 'info');
+                        refreshCard(data.product_id);
+                    }
+                });
+                socket.on('auction-bid', function(data){
+                    lastSocketUpdate = Date.now();
+                    if (data && data.product_id) {
+                        if (USERNAME && data.bidder === USERNAME) {
+                            notify('Your bid placed: ' + data.bid, 'success');
+                        } else {
+                            notify('\uD83D\uDD28 ' + data.bidder + ' bid ' + data.bid, 'info');
+                        }
+                        refreshCard(data.product_id);
+                    }
+                });
+            } catch(e) { console.warn('[LiveSale] Socket.io init failed:', e.message); }
+        };
+        document.head.appendChild(socketioScript);
+    }
 
 })(jQuery);

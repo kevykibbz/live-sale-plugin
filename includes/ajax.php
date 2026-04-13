@@ -101,7 +101,7 @@ function lsg_ajax_claim_product() {
     if ( $product ) WC()->cart->add_to_cart( $pid, 1 );
 
     $product_data = wc_get_product( $pid );
-    lsg_ably_publish( ABLY_PRODUCT_CHANNEL, 'product-updated', [
+    lsg_socketio_publish( LSG_SOCKETIO_PRODUCT_CHANNEL, 'product-updated', [
         'product_id' => $pid,
         'name'       => $product_data ? $product_data->get_name() : '',
         'claimed_by' => $username,
@@ -186,7 +186,7 @@ function lsg_ajax_enter_giveaway() {
 
     $entrants[] = $username;
     update_post_meta( $pid, 'lsg_giveaway_entrants', $entrants );
-    lsg_ably_publish( ABLY_PRODUCT_CHANNEL, 'giveaway-entered', [
+    lsg_socketio_publish( LSG_SOCKETIO_PRODUCT_CHANNEL, 'giveaway-entered', [
         'product_id' => $pid,
         'entrants'   => count( $entrants ),
     ] );
@@ -217,7 +217,7 @@ function lsg_ajax_start_giveaway() {
     update_post_meta( $pid, 'lsg_giveaway_restart_count', 0 ); // Reset restart counter on fresh start
     lsg_increment_global_version();
 
-    lsg_ably_publish( ABLY_PRODUCT_CHANNEL, 'giveaway-started', [
+    lsg_socketio_publish( LSG_SOCKETIO_PRODUCT_CHANNEL, 'giveaway-started', [
         'product_id' => $pid,
         'end_time'   => $end_time,
         'duration'   => $duration,
@@ -300,7 +300,7 @@ function lsg_ajax_place_bid() {
     update_post_meta( $pid, '_lsg_version', (int) get_post_meta( $pid, '_lsg_version', true ) + 1 );
 
     $product = wc_get_product( $pid );
-    lsg_ably_publish( ABLY_PRODUCT_CHANNEL, 'auction-bid', [
+    lsg_socketio_publish( LSG_SOCKETIO_PRODUCT_CHANNEL, 'auction-bid', [
         'product_id' => $pid,
         'name'       => $product ? $product->get_name() : '',
         'bidder'     => $username,
@@ -335,7 +335,7 @@ function lsg_ajax_start_auction() {
     update_post_meta( $pid, 'lsg_auction_bids',            [] );
     lsg_increment_global_version();
 
-    lsg_ably_publish( ABLY_PRODUCT_CHANNEL, 'auction-started', [
+    lsg_socketio_publish( LSG_SOCKETIO_PRODUCT_CHANNEL, 'auction-started', [
         'product_id' => $pid,
         'end_time'   => $end_time,
         'base_price' => $base,
@@ -357,7 +357,7 @@ function lsg_ajax_end_auction() {
     lsg_increment_global_version();
 
     $product = wc_get_product( $pid );
-    lsg_ably_publish( ABLY_PRODUCT_CHANNEL, 'auction-ended', [
+    lsg_socketio_publish( LSG_SOCKETIO_PRODUCT_CHANNEL, 'auction-ended', [
         'product_id' => $pid,
         'name'       => $product ? $product->get_name() : '',
         'winner'     => $winner ?: 'No bids',
@@ -488,7 +488,7 @@ add_action( 'wp_ajax_lsg_delete_product', function () {
     $deleted = wp_delete_post( $pid, true );
     if ( $deleted ) {
         lsg_increment_global_version();
-        lsg_ably_publish( ABLY_PRODUCT_CHANNEL, 'product-deleted', [ 'product_id' => $pid ] );
+        lsg_socketio_publish( LSG_SOCKETIO_PRODUCT_CHANNEL, 'product-deleted', [ 'product_id' => $pid ] );
         wp_send_json_success();
     } else {
         wp_send_json_error( 'Could not delete.' );
@@ -571,7 +571,7 @@ function lsg_ajax_send_chat() {
     }
 
     update_option( 'lsg_chat_messages', $messages, false );
-    lsg_ably_publish( ABLY_CHAT_CHANNEL, 'chat-message', [
+    lsg_socketio_publish( LSG_SOCKETIO_CHAT_CHANNEL, 'new-message', [
         'user'      => $username,
         'text'      => $text,
         'timestamp' => end( $messages )['timestamp'],
@@ -601,7 +601,7 @@ function lsg_ajax_admin_send_chat() {
     if ( count( $messages ) > 200 ) $messages = array_slice( $messages, -200 );
     update_option( 'lsg_chat_messages', $messages, false );
 
-    lsg_ably_publish( ABLY_CHAT_CHANNEL, 'chat-message', [
+    lsg_socketio_publish( LSG_SOCKETIO_CHAT_CHANNEL, 'new-message', [
         'user'      => $username,
         'text'      => $text,
         'timestamp' => end( $messages )['timestamp'],
@@ -622,7 +622,7 @@ function lsg_ajax_admin_delete_msg() {
 
     array_splice( $messages, $idx, 1 );
     update_option( 'lsg_chat_messages', array_values( $messages ), false );
-    lsg_ably_publish( ABLY_CHAT_CHANNEL, 'chat-deleted', [ 'index' => $idx ] );
+    lsg_socketio_publish( LSG_SOCKETIO_CHAT_CHANNEL, 'chat-deleted', [ 'index' => $idx ] );
     wp_send_json_success();
 }
 
@@ -631,6 +631,6 @@ function lsg_ajax_admin_clear_chat() {
     check_ajax_referer( 'lsg_chat_nonce', '_ajax_nonce' );
     if ( ! current_user_can( 'manage_woocommerce' ) ) wp_send_json_error( 'No permission.' );
     update_option( 'lsg_chat_messages', [], false );
-    lsg_ably_publish( ABLY_CHAT_CHANNEL, 'chat-cleared', [] );
+    lsg_socketio_publish( LSG_SOCKETIO_CHAT_CHANNEL, 'chat-cleared', [] );
     wp_send_json_success();
 }

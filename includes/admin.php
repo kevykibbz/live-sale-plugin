@@ -143,8 +143,8 @@ function lsg_admin_chat_tab() {
     jQuery(function($){
         var nonce      = <?php echo wp_json_encode( $nonce ); ?>;
         var ajax       = <?php echo wp_json_encode( admin_url( 'admin-ajax.php' ) ); ?>;
-        var ablyKey    = <?php echo wp_json_encode( ABLY_API_KEY ); ?>;
-        var ablyChan   = <?php echo wp_json_encode( ABLY_CHAT_CHANNEL ); ?>;
+        var socketioUrl  = <?php echo wp_json_encode( LSG_SOCKETIO_URL ); ?>;
+        var socketioChan = <?php echo wp_json_encode( LSG_SOCKETIO_CHAT_CHANNEL ); ?>;
         var adminName  = <?php echo wp_json_encode( wp_get_current_user()->display_name ?: wp_get_current_user()->user_login ); ?>;
 
         // Track how many messages are already in the table (original count before reverse for display)
@@ -188,7 +188,7 @@ function lsg_admin_chat_tab() {
             }
         }
 
-        // ---- Load new messages from server (called by Ably + fallback poll) ----
+        // ---- Load new messages from server (called by Socket.io + fallback poll) ----
         function loadNewMessages() {
             $.post(ajax, { action:'lsg_fetch_chat', _ajax_nonce:nonce }, function(res){
                 if ( !res.success ) return;
@@ -293,23 +293,26 @@ function lsg_admin_chat_tab() {
             setTimeout(function(){ el.fadeOut(); }, 3000);
         }
 
-        // ---- Ably real-time subscription ----
-        if ( ablyKey ) {
-            var ablyScript = document.createElement('script');
-            ablyScript.src = 'https://cdn.ably.com/lib/ably.min-1.js';
-            ablyScript.async = true;
-            ablyScript.onload = function(){
+        // ---- Socket.io real-time subscription ----
+        if ( socketioUrl ) {
+            var socketioScript = document.createElement('script');
+            socketioScript.src = socketioUrl + '/socket.io/socket.io.js';
+            socketioScript.async = true;
+            socketioScript.onload = function(){
                 try {
-                    var ably = new Ably.Realtime(ablyKey);
-                    ably.channels.get(ablyChan).subscribe('chat-message', function(){
+                    var socket = io(socketioUrl);
+                    socket.emit('join', socketioChan);
+                    socket.on('new-message', function(){
                         loadNewMessages();
                     });
-                } catch(e){ console.warn('[LSG Admin Chat] Ably error:', e.message); }
+                    socket.on('chat-deleted', function(){ loadNewMessages(); });
+                    socket.on('chat-cleared', function(){ loadNewMessages(); });
+                } catch(e){ console.warn('[LSG Admin Chat] Socket.io error:', e.message); }
             };
-            document.head.appendChild(ablyScript);
+            document.head.appendChild(socketioScript);
         }
 
-        // ---- Fallback poll every 8s (catches messages when Ably is unavailable) ----
+        // ---- Fallback poll every 8s (catches messages when Socket.io is unavailable) ----
         setInterval(loadNewMessages, 8000);
     });
     </script>
@@ -566,28 +569,28 @@ function lsg_admin_products_tab() {
         }
         setInterval(updateAdminTimers, 1000);
 
-        // Real-time admin row updates via Ably
+        // Real-time admin row updates via Socket.io
         (function(){
-            var ablyKey     = '<?php echo esc_js( ABLY_API_KEY ); ?>';
-            var ablyChannel = '<?php echo esc_js( ABLY_PRODUCT_CHANNEL ); ?>';
-            var rowNonce    = '<?php echo wp_create_nonce( 'live_sale_update' ); ?>';
-            if (!ablyKey) return;
+            var socketioUrl  = '<?php echo esc_js( LSG_SOCKETIO_URL ); ?>';
+            var socketioChan = '<?php echo esc_js( LSG_SOCKETIO_PRODUCT_CHANNEL ); ?>';
+            var rowNonce     = '<?php echo wp_create_nonce( 'live_sale_update' ); ?>';
+            if (!socketioUrl) return;
             function refreshAdminRow(pid) {
                 $.post(ajaxurl, { action: 'lsg_refresh_admin_row', product_id: pid, _ajax_nonce: rowNonce }, function(r){
                     if (r.success && r.data && r.data.html) $('#product-row-' + pid).replaceWith(r.data.html);
                 });
             }
             var s = document.createElement('script');
-            s.src = 'https://cdn.ably.com/lib/ably.min-1.js';
+            s.src = socketioUrl + '/socket.io/socket.io.js';
             s.async = true;
             s.onload = function() {
                 try {
-                    var ably = new Ably.Realtime(ablyKey);
-                    var ch   = ably.channels.get(ablyChannel);
-                    ch.subscribe('product-updated',  function(m){ if (m.data && m.data.product_id) refreshAdminRow(m.data.product_id); });
-                    ch.subscribe('giveaway-started', function(m){ if (m.data && m.data.product_id) refreshAdminRow(m.data.product_id); });
-                    ch.subscribe('giveaway-winner',  function(m){ if (m.data && m.data.product_id) refreshAdminRow(m.data.product_id); });
-                } catch(e) { console.warn('[LiveSale Admin] Ably init failed:', e.message); }
+                    var socket = io(socketioUrl);
+                    socket.emit('join', socketioChan);
+                    socket.on('product-updated',  function(d){ if (d && d.product_id) refreshAdminRow(d.product_id); });
+                    socket.on('giveaway-started', function(d){ if (d && d.product_id) refreshAdminRow(d.product_id); });
+                    socket.on('giveaway-winner',  function(d){ if (d && d.product_id) refreshAdminRow(d.product_id); });
+                } catch(e) { console.warn('[LiveSale Admin] Socket.io init failed:', e.message); }
             };
             document.head.appendChild(s);
         })();
@@ -879,7 +882,7 @@ function lsg_handle_create_product() : bool {
         if ( $image_id ) set_post_thumbnail( $pid, $image_id );
 
         lsg_increment_global_version();
-        lsg_ably_publish( ABLY_PRODUCT_CHANNEL, 'new_product', [ 'product_id' => $pid ] );
+        lsg_socketio_publish( LSG_SOCKETIO_PRODUCT_CHANNEL, 'new_product', [ 'product_id' => $pid ] );
         return true;
     } catch ( Exception $e ) {
         error_log( '[LSG] Create product error: ' . $e->getMessage() );

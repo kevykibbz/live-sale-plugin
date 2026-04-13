@@ -1,10 +1,10 @@
 # Live Sale – Real-Time WooCommerce Product Grid & Chat
 
-A WordPress/WooCommerce plugin that adds a live product grid with real-time claiming, waitlists, giveaways, and a live chat — powered by Ably WebSockets.
+A WordPress/WooCommerce plugin that adds a live product grid with real-time claiming, waitlists, giveaways, and a live chat — powered by a self-hosted Socket.io server.
 
 ## Features
 
-- Real-time product grid via Ably (claim, waitlist, giveaway, timers)
+- Real-time product grid via Socket.io (claim, waitlist, giveaway, timers)
 - Live chat with admin moderation (delete messages, clear all)
 - Giveaway system: countdown timer, automatic winner roll, winner email, free WooCommerce order creation
 - Skeleton loading, toast notifications
@@ -15,14 +15,14 @@ A WordPress/WooCommerce plugin that adds a live product grid with real-time clai
 - WordPress 6.0+
 - WooCommerce 7.0+
 - PHP 8.0+
-- An [Ably](https://ably.com) account (free tier works for development)
-- Optional: Ably PHP library for server-side publishing (`composer require ably/ably-php`)
+- Node.js 18+ (for the Socket.io server — deploy on your Digital Ocean droplet)
 
 ## Installation
 
 1. Upload the `livesale/` folder to `wp-content/plugins/`
-2. Add your Ably API key to `wp-config.php` (see Configuration)
-3. Activate the plugin in WordPress → Plugins
+2. Deploy the Socket.io server (see `server/` directory) on your Digital Ocean droplet
+3. Add the server URL and secret to `wp-config.php` (see Configuration)
+4. Activate the plugin in WordPress → Plugins
 4. Add the shortcodes to any page:
    - `[live_sale_grid]` — product grid
    - `[live_sale_chat]` — live chat
@@ -32,21 +32,22 @@ A WordPress/WooCommerce plugin that adds a live product grid with real-time clai
 Add to `wp-config.php` **before** the `That's all, stop editing!` line:
 
 ```php
-define( 'LSG_ABLY_API_KEY', 'your_ably_api_key_here' );
+define( 'LSG_SOCKETIO_URL',    'https://your-droplet-ip-or-domain:3000' );
+define( 'LSG_SOCKETIO_SECRET', 'your_strong_shared_secret_here' );
 ```
 
-Get your API key from: https://ably.com → Apps → API Keys
+The `LSG_SOCKETIO_SECRET` must match the `LSG_SECRET` value in `server/.env` on your Node.js server.
 
-## Ably PHP Library (optional but recommended)
-
-Install via Composer in the plugin directory:
+## Socket.io Server Setup
 
 ```bash
-cd wp-content/plugins/livesale
-composer require ably/ably-php
+cd wp-content/plugins/livesale/server
+cp .env.example .env
+# Edit .env: set LSG_SECRET and CORS_ORIGIN to your WordPress site URL
+npm install
+node server.js
+# Or with PM2 (recommended): pm2 start server.js --name livesale
 ```
-
-Without it, real-time server-side publishing is disabled but the frontend still polls via AJAX.
 
 ## Shortcodes
 
@@ -78,7 +79,7 @@ Each product can be turned into a giveaway by the admin. The full flow is:
 1. **Admin marks a product as Giveaway** and sets a countdown duration
 2. A **live countdown timer** displays on the product card for all visitors
 3. When the timer hits zero, the server automatically **rolls a winner** from the claimed users list (WP cron)
-4. The winner is broadcast to all connected browsers via Ably
+4. The winner is broadcast to all connected browsers via Socket.io
 5. **Winner's browser** shows:
    - Green banner: *"🏆 You won this giveaway!"*
    - Pulsing green button: *"🎁 View Your Order #X"* — links to WooCommerce orders page

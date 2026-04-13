@@ -38,18 +38,18 @@ function lsg_grid_shortcode( $atts ) : string {
         'lsg-grid-js',
         plugin_dir_url( dirname( __FILE__ ) ) . 'js/livesale-grid.js',
         [ 'jquery' ],
-        '5.2',
+        '5.5',
         true
     );
     wp_localize_script( 'lsg-grid-js', 'lsgGrid', [
         'ajax'         => admin_url( 'admin-ajax.php' ),
-        'nonce'        => wp_create_nonce( 'lsg_grid' ),
+        'nonce'        => wp_create_nonce( 'lsg_actions' ),
         'username'     => ( function() {
             $u = wp_get_current_user();
             return $u && $u->exists() ? ( $u->display_name ?: $u->user_login ) : '';
         } )(),
-        'ably_key'     => ABLY_API_KEY,
-        'ably_channel' => ABLY_PRODUCT_CHANNEL,
+        'socketio_url'     => LSG_SOCKETIO_URL,
+        'socketio_channel' => LSG_SOCKETIO_PRODUCT_CHANNEL,
         'init_version' => (int) get_option( 'lsg_global_version', 0 ),
     ] );
 
@@ -153,7 +153,7 @@ function lsg_chat_shortcode( $atts ) : string {
         'lsg-chat-js',
         plugin_dir_url( dirname( __FILE__ ) ) . 'js/livesale-chat.js',
         [ 'jquery' ],
-        '5.0',
+        '5.4',
         true
     );
 
@@ -164,8 +164,8 @@ function lsg_chat_shortcode( $atts ) : string {
         'nonce'        => wp_create_nonce( 'lsg_chat' ),
         'is_admin'     => current_user_can( 'manage_woocommerce' ) ? '1' : '0',
         'username'     => $username,
-        'ably_key'     => ABLY_API_KEY,
-        'ably_channel' => ABLY_CHAT_CHANNEL,
+        'socketio_url'     => LSG_SOCKETIO_URL,
+        'socketio_channel' => LSG_SOCKETIO_CHAT_CHANNEL,
     ] );
 
     ob_start();
@@ -253,8 +253,8 @@ function lsg_giveaway_overlay_shortcode( $atts ) : string {
 
     $nonce       = wp_create_nonce( 'lsg_actions' );
     $ajax_url    = admin_url( 'admin-ajax.php' );
-    $ably_key    = ABLY_API_KEY;
-    $ably_chan    = ABLY_PRODUCT_CHANNEL;
+    $socketio_url  = LSG_SOCKETIO_URL;
+    $socketio_chan  = LSG_SOCKETIO_PRODUCT_CHANNEL;
 
     ob_start();
     ?>
@@ -294,8 +294,8 @@ function lsg_giveaway_overlay_shortcode( $atts ) : string {
         var endTime  = parseInt(overlay.dataset.end,  10) || 0;
         var nonce    = <?php echo wp_json_encode( $nonce ); ?>;
         var ajax     = <?php echo wp_json_encode( $ajax_url ); ?>;
-        var ablyKey  = <?php echo wp_json_encode( $ably_key ); ?>;
-        var ablyChan = <?php echo wp_json_encode( $ably_chan ); ?>;
+        var socketioUrl  = <?php echo wp_json_encode( $socketio_url ); ?>;
+        var socketioChan = <?php echo wp_json_encode( $socketio_chan ); ?>;
         var isLoggedIn = <?php echo $is_logged_in ? 'true' : 'false'; ?>;
         var loginUrl   = <?php echo wp_json_encode( $login_url ); ?>;
         var tickTimer;
@@ -348,18 +348,17 @@ function lsg_giveaway_overlay_shortcode( $atts ) : string {
         }
         attachJoin();
 
-        // ---- Ably real-time updates ----
-        if (ablyKey) {
+        // ---- Socket.io real-time updates ----
+        if (socketioUrl) {
             var s  = document.createElement('script');
-            s.src  = 'https://cdn.ably.com/lib/ably.min-1.js';
+            s.src  = socketioUrl + '/socket.io/socket.io.js';
             s.async = true;
             s.onload = function() {
                 try {
-                    var ably = new Ably.Realtime(ablyKey);
-                    var ch   = ably.channels.get(ablyChan);
+                    var socket = io(socketioUrl);
+                    socket.emit('join', socketioChan);
 
-                    ch.subscribe('giveaway-started', function(msg){
-                        var d = msg.data;
+                    socket.on('giveaway-started', function(d){
                         if (!d || !d.product_id) return;
                         pid     = parseInt(d.product_id, 10);
                         endTime = parseInt(d.end_time,   10);
@@ -378,10 +377,8 @@ function lsg_giveaway_overlay_shortcode( $atts ) : string {
                         }
                     });
 
-                    ch.subscribe('giveaway-winner',  hideOverlay);
-                    ch.subscribe('giveaway-entered', function(msg){
-                        // no-op on overlay (grid handles entrant count)
-                    });
+                    socket.on('giveaway-winner', hideOverlay);
+                    // giveaway-entered: no-op on overlay (grid handles entrant count)
 
                     function hideOverlay() {
                         clearInterval(tickTimer);
@@ -392,7 +389,7 @@ function lsg_giveaway_overlay_shortcode( $atts ) : string {
                         actionsEl.innerHTML = '<span class="lsg-gwo-idle">Giveaway ended</span>';
                     }
 
-                } catch(e) { console.warn('[LSG Overlay] Ably init failed:', e.message); }
+                } catch(e) { console.warn('[LSG Overlay] Socket.io init failed:', e.message); }
             };
             document.head.appendChild(s);
         }
@@ -681,18 +678,18 @@ function lsg_auction_widget_shortcode( $atts ) : string {
         'lsg-grid-js',
         plugin_dir_url( dirname( __FILE__ ) ) . 'js/livesale-grid.js',
         [ 'jquery' ],
-        '5.2',
+        '5.5',
         true
     );
     wp_localize_script( 'lsg-grid-js', 'lsgGrid', [
         'ajax'         => admin_url( 'admin-ajax.php' ),
-        'nonce'        => wp_create_nonce( 'lsg_grid' ),
+        'nonce'        => wp_create_nonce( 'lsg_actions' ),
         'username'     => ( function() {
             $u = wp_get_current_user();
             return $u && $u->exists() ? ( $u->display_name ?: $u->user_login ) : '';
         } )(),
-        'ably_key'     => ABLY_API_KEY,
-        'ably_channel' => ABLY_PRODUCT_CHANNEL,
+        'socketio_url'     => LSG_SOCKETIO_URL,
+        'socketio_channel' => LSG_SOCKETIO_PRODUCT_CHANNEL,
         'init_version' => (int) get_option( 'lsg_global_version', 0 ),
     ] );
 

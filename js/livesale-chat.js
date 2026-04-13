@@ -1,9 +1,9 @@
 jQuery(function($){
-    var AJAX       = lsgChat.ajax;
-    var IS_ADMIN   = lsgChat.is_admin;
-    var chatNonce  = lsgChat.nonce;
-    var ABLY_KEY     = lsgChat.ably_key;
-    var ABLY_CHANNEL = lsgChat.ably_channel;
+    var AJAX         = lsgChat.ajax;
+    var IS_ADMIN     = lsgChat.is_admin;
+    var chatNonce    = lsgChat.nonce;
+    var SOCKETIO_URL     = lsgChat.socketio_url;
+    var SOCKETIO_CHANNEL = lsgChat.socketio_channel;
 
     function esc(s){ return $('<span>').text(s).html(); }
 
@@ -168,17 +168,38 @@ jQuery(function($){
     $('#lsg-chat-input').on('keypress', function(e){ if (e.which===13) sendMsg(); });
 
     showSkeletons();
-    setInterval(loadChat, 4000);
+    var chatPollInterval = setInterval(loadChat, 4000); // fallback polling — cancelled when Socket.io connects
     loadChat();
 
-    var ablyScript = document.createElement('script');
-    ablyScript.src = 'https://cdn.ably.com/lib/ably.min-1.js';
-    ablyScript.async = true;
-    ablyScript.onload = function() {
-        try {
-            var ably = new Ably.Realtime(ABLY_KEY);
-            ably.channels.get(ABLY_CHANNEL).subscribe('new-message', function(){ loadChat(); });
-        } catch(e) { console.warn('[LiveSale Chat] Ably init failed:', e.message); }
-    };
-    document.head.appendChild(ablyScript);
+    // Load Socket.io client non-blocking
+    if (SOCKETIO_URL) {
+        var socketioScript = document.createElement('script');
+        socketioScript.src = SOCKETIO_URL + '/socket.io/socket.io.js';
+        socketioScript.async = true;
+        socketioScript.onload = function() {
+            try {
+                var socket = io(SOCKETIO_URL);
+                socket.emit('join', SOCKETIO_CHANNEL);
+
+                socket.on('new-message', function(){ loadChat(); });
+
+                // Once Socket.io is connected, drop frequent polling to a slow heartbeat
+                socket.on('connect', function() {
+                    clearInterval(chatPollInterval);
+                    chatPollInterval = setInterval(loadChat, 30000); // 30-second heartbeat fallback
+                });
+
+                // If Socket.io disconnects, restore fast polling so chat stays live
+                socket.on('disconnect', function() {
+                    clearInterval(chatPollInterval);
+                    chatPollInterval = setInterval(loadChat, 4000);
+                });
+                socket.on('reconnect', function() {
+                    clearInterval(chatPollInterval);
+                    chatPollInterval = setInterval(loadChat, 30000);
+                });
+            } catch(e) { console.warn('[LiveSale Chat] Socket.io init failed:', e.message); }
+        };
+        document.head.appendChild(socketioScript);
+    }
 });

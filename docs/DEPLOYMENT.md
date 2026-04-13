@@ -4,7 +4,7 @@
 
 ### Suggested repo details (tell your developer):
 - **Repository name:** `live-sale-plugin`
-- **Description:** Real-time WooCommerce live sale product grid and chat powered by Ably WebSockets
+- **Description:** Real-time WooCommerce live sale product grid and chat powered by self-hosted Socket.io
 - **Visibility:** Private
 - **No template** needed
 
@@ -64,20 +64,25 @@ Option B — **DigitalOcean Team invite**:
 1. **Complete WordPress setup** — visit `http://<droplet-ip>` to run WordPress installer
 2. **Install WooCommerce** — Plugins → Add New → WooCommerce
 3. **Upload the plugin** — SFTP the `livesale/` folder to `/var/www/html/wp-content/plugins/`
-4. **Add Ably key to wp-config.php**:
-   ```php
-   define( 'LSG_ABLY_API_KEY', 'tez0cg.QzrezA:MptL-_B4Pzto4ezrgtCmXES3PSrqCWnvYdvJP7RL2U8' );
+4. **Deploy the Socket.io server** on the droplet:
+   ```bash
+   cd /var/www/html/wp-content/plugins/livesale/server
+   cp .env.example .env
+   # Edit .env — set LSG_SECRET and CORS_ORIGIN=https://yourdomain.com
+   npm install
+   pm2 start server.js --name livesale
+   pm2 startup && pm2 save
    ```
-5. **Activate the plugin** — WordPress Admin → Plugins → Live Sale
-6. **Point your domain** — Add A record: `yourdomain.com → <droplet-ip>`
-7. **Install SSL** (free HTTPS):
+5. **Add Socket.io config to wp-config.php**:
+   ```php
+   define( 'LSG_SOCKETIO_URL',    'https://yourdomain.com:3000' );
+   define( 'LSG_SOCKETIO_SECRET', 'your_strong_shared_secret_here' );
+   ```
+6. **Activate the plugin** — WordPress Admin → Plugins → Live Sale
+7. **Point your domain** — Add A record: `yourdomain.com → <droplet-ip>`
+8. **Install SSL** (free HTTPS):
    ```bash
    sudo certbot --apache -d yourdomain.com
-   ```
-8. **Install Ably PHP library** (for server-side push):
-   ```bash
-   cd /var/www/html/wp-content/plugins/livesale
-   composer require ably/ably-php
    ```
 
 ---
@@ -87,7 +92,8 @@ Option B — **DigitalOcean Team invite**:
 - [ ] WordPress installed and admin account created
 - [ ] WooCommerce installed and configured (currency set to KES)
 - [ ] Plugin activated
-- [ ] `LSG_ABLY_API_KEY` added to wp-config.php
+- [ ] `LSG_SOCKETIO_URL` and `LSG_SOCKETIO_SECRET` added to wp-config.php
+- [ ] Socket.io server running on droplet (pm2 status)
 - [ ] "Live Sale" product category created
 - [ ] Products assigned to "Live Sale" category
 - [ ] `[live_sale_grid]` shortcode added to Live Sale page
@@ -101,7 +107,7 @@ Option B — **DigitalOcean Team invite**:
 
 ---
 
-## Ably API Key (keep this secret — do not share publicly)
+## Socket.io Server Secret (keep this secret — do not share publicly)
 
-Key is stored in `wp-config.php` on the server as `LSG_ABLY_API_KEY`.
-Dashboard: https://ably.com/accounts → your app → API Keys
+The shared secret is stored in `wp-config.php` as `LSG_SOCKETIO_SECRET` and in `server/.env` as `LSG_SECRET`.
+Both values must match exactly. Use a long random string (32+ characters).

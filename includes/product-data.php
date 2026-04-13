@@ -92,8 +92,8 @@ function lsg_get_product_data( int $product_id ) : ?array {
                     // Update local vars so card shows extended time
                     $giveaway_end_time = $new_end_time;
                     
-                    // Publish restart event to Ably
-                    lsg_ably_publish( ABLY_PRODUCT_CHANNEL, 'giveaway-restarted', [
+                    // Publish restart event to Socket.io
+                    lsg_socketio_publish( LSG_SOCKETIO_PRODUCT_CHANNEL, 'giveaway-restarted', [
                         'product_id'    => $product_id,
                         'new_end_time'  => $new_end_time,
                         'restart_count' => $restart_count + 1,
@@ -537,7 +537,7 @@ function lsg_do_roll_winner( int $pid ) : array {
     }
 
     $product = wc_get_product( $pid );
-    lsg_ably_publish( ABLY_PRODUCT_CHANNEL, 'giveaway-winner', [
+    lsg_socketio_publish( LSG_SOCKETIO_PRODUCT_CHANNEL, 'giveaway-winner', [
         'product_id' => $pid,
         'name'       => $product ? $product->get_name() : '',
         'winner'     => $winner ?: 'No entrants',

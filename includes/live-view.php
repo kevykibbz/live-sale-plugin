@@ -110,8 +110,8 @@ function lsg_live_view_shortcode( $atts ) : string {
         'nonce'        => wp_create_nonce( 'lsg_chat_nonce' ),
         'is_admin'     => current_user_can( 'manage_woocommerce' ),  // Boolean, not string
         'username'     => $username,
-        'ably_key'     => ABLY_API_KEY,
-        'ably_channel' => ABLY_CHAT_CHANNEL,
+        'socketio_url'     => LSG_SOCKETIO_URL,
+        'socketio_channel' => LSG_SOCKETIO_CHAT_CHANNEL,
     ] );
 
     $embed_url     = lsg_normalize_video_url( $video_url );
@@ -139,8 +139,8 @@ function lsg_live_view_shortcode( $atts ) : string {
     wp_localize_script( 'lsg-grid', 'lsgGrid', [
         'ajax'         => admin_url( 'admin-ajax.php' ),
         'nonce'        => wp_create_nonce( 'lsg_actions' ),
-        'ably_key'     => ABLY_API_KEY,
-        'ably_channel' => ABLY_PRODUCT_CHANNEL,
+        'socketio_url'     => LSG_SOCKETIO_URL,
+        'socketio_channel' => LSG_SOCKETIO_PRODUCT_CHANNEL,
         'username'     => $username,
         'init_version' => (int) get_option( 'lsg_global_version', 0 ),
     ] );
