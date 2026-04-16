@@ -377,12 +377,38 @@
 }
 
 /* ----------------------------------------------------------------
-   PRODUCT GRID below the player
+   SIDE-BY-SIDE layout  (layout="side" — video left, grid right)
+   ---------------------------------------------------------------- */
+.lsg-lv-side-row {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 0;
+    width: 100%;
+}
+
+/* Grid column in side layout gets its own scroll and padding */
+.lsg-lv-grid-side {
+    overflow-y: auto;
+    max-height: 90vh;
+    padding: 0 20px;
+    box-sizing: border-box;
+}
+
+/* ----------------------------------------------------------------
+   PRODUCT GRID below the player (stack layout) or inside side col
    ---------------------------------------------------------------- */
 .lsg-lv-products {
     max-width: 1400px;
     margin: 0 auto;
     padding: 0 24px;             /* restore side padding removed from .lsg-lv-wrap */
+}
+
+/* In side layout, remove the extra max-width constraint so it fills the column */
+.lsg-lv-layout-side .lsg-lv-products {
+    max-width: none;
+    padding: 0;
+    margin: 0;
 }
 
 /* ----------------------------------------------------------------
@@ -481,4 +507,9 @@
     .lsg-lv-chat-col #lsg-chat-login-prompt a { color: #1557b0; }
 
     .lsg-lv-products { padding: 0 16px; }
+
+    /* side layout collapses to stack on mobile */
+    .lsg-lv-side-row { flex-direction: column; }
+    .lsg-lv-side-row > div { flex: 0 0 100% !important; max-width: 100% !important; }
+    .lsg-lv-grid-side { max-height: none; overflow-y: visible; padding: 0 16px; }
 }

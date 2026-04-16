@@ -88,12 +88,17 @@ function lsg_live_view_shortcode( $atts ) : string {
         'chat_side'  => 'left',
         'chat_width' => '30',
         'aspect'     => '16 / 9',
+        'layout'     => 'side',   // 'side' = video left + grid right | 'stack' = video top + grid below
+        'video_width'=> '40',     // percent of row used by video column (side layout only)
     ], $atts, 'lsg_live_view' );
 
-    $video_url  = esc_url_raw( $atts['video_url'] );
-    $chat_side  = in_array( $atts['chat_side'], [ 'left', 'right' ], true ) ? $atts['chat_side'] : 'left';
-    $chat_width = max( 15, min( 50, (int) $atts['chat_width'] ) );
-    $aspect     = sanitize_text_field( $atts['aspect'] );
+    $video_url   = esc_url_raw( $atts['video_url'] );
+    $chat_side   = in_array( $atts['chat_side'], [ 'left', 'right' ], true ) ? $atts['chat_side'] : 'left';
+    $chat_width  = max( 15, min( 50, (int) $atts['chat_width'] ) );
+    $aspect      = sanitize_text_field( $atts['aspect'] );
+    $layout      = $atts['layout'] === 'stack' ? 'stack' : 'side';
+    $video_width = max( 20, min( 70, (int) $atts['video_width'] ) );
+    $grid_width  = 100 - $video_width;
 
     if ( ! $video_url ) {
         return '<p style="color:#c00;">[lsg_live_view] shortcode requires a <code>video_url</code> attribute.</p>';
@@ -198,7 +203,7 @@ function lsg_live_view_shortcode( $atts ) : string {
     ?>
 
     <!-- ===== Live Sales page: full-width breakout ===== -->
-    <div id="<?php echo esc_attr( $wrap_id ); ?>" class="lsg-lv-wrap">
+    <div id="<?php echo esc_attr( $wrap_id ); ?>" class="lsg-lv-wrap lsg-lv-layout-<?php echo esc_attr( $layout ); ?>">
 
         <!-- ── Top strip: Live badge + viewer count ── -->
         <div class="lsg-lv-topbar">
@@ -206,7 +211,13 @@ function lsg_live_view_shortcode( $atts ) : string {
             <span id="lsg-viewer-count" class="lsg-lv-viewers">– viewers</span>
         </div>
 
-        <!-- ── Full-width video stage with chat overlaid on top ── -->
+        <?php if ( $layout === 'side' ) : ?>
+        <!-- ── Side-by-side: video+chat left, product grid right ── -->
+        <div class="lsg-lv-side-row">
+        <div style="flex:0 0 <?php echo (int) $video_width; ?>%;max-width:<?php echo (int) $video_width; ?>%;">
+        <?php endif; ?>
+
+        <!-- ── Video stage with chat overlaid on top ── -->
         <div class="lsg-lv-columns">
 
             <!-- Video fills 100% width -->
@@ -287,7 +298,12 @@ function lsg_live_view_shortcode( $atts ) : string {
 
         </div><!-- .lsg-lv-columns -->
 
-        <!-- ── Product grid below the player ── -->
+        <?php if ( $layout === 'side' ) : ?>
+        </div><!-- video side -->
+        <div class="lsg-lv-grid-side" style="flex:0 0 <?php echo (int) $grid_width; ?>%;max-width:<?php echo (int) $grid_width; ?>%;">
+        <?php endif; ?>
+
+        <!-- ── Product grid ── -->
         <!-- Notifications + lightbox needed by livesale-grid.js -->
         <div id="lsg-notifications" style="position:fixed;top:20px;right:20px;z-index:9999;max-width:340px;pointer-events:none;"></div>
         <div id="lsg-lightbox" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;justify-content:center;align-items:center;">
@@ -304,6 +320,11 @@ function lsg_live_view_shortcode( $atts ) : string {
             <!-- lsg-grid is filled immediately by livesale-grid.js via AJAX (claim/waitlist/giveaway/auction cards) -->
             <div id="lsg-grid"></div>
         </section>
+
+        <?php if ( $layout === 'side' ) : ?>
+        </div><!-- grid side -->
+        </div><!-- .lsg-lv-side-row -->
+        <?php endif; ?>
 
     </div><!-- .lsg-lv-wrap -->
 
