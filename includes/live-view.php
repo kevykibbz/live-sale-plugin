@@ -46,6 +46,17 @@ function lsg_normalize_video_url( string $url ) : string {
     }
     if ( strpos( $url, 'player.vimeo.com/video' ) !== false ) return $url;
 
+    // Twitch — twitch.tv/CHANNEL or player.twitch.tv?channel=CHANNEL
+    if ( preg_match( '#twitch\.tv/([a-zA-Z0-9_]+)#i', $url, $m ) ) {
+        $host = wp_parse_url( home_url(), PHP_URL_HOST );
+        // Twitch requires every parent domain explicitly; add www. variant when needed
+        $parents = 'parent=' . $host;
+        if ( strpos( $host, 'www.' ) !== 0 ) {
+            $parents .= '&parent=www.' . $host;
+        }
+        return 'https://player.twitch.tv/?channel=' . rawurlencode( $m[1] ) . '&' . $parents;
+    }
+
     // youtube.com/watch?v=ID  or  youtube.com/shorts/ID
     if ( preg_match( '/youtube\.com\/(?:watch\?v=|shorts\/)([a-zA-Z0-9_-]{11})/', $url, $m ) ) {
         return 'https://www.youtube-nocookie.com/embed/' . $m[1] . '?rel=0&modestbranding=1';
@@ -93,13 +104,13 @@ function lsg_live_view_shortcode( $atts ) : string {
         'lsg-chat',
         plugin_dir_url( dirname( __FILE__ ) ) . 'css/livesale-chat.css',
         [],
-        '5.0'
+        '6.0'
     );
     wp_enqueue_script(
         'lsg-chat-js',
         plugin_dir_url( dirname( __FILE__ ) ) . 'js/livesale-chat.js',
         [ 'jquery' ],
-        '5.0',
+        '6.0',
         true
     );
 
@@ -195,10 +206,10 @@ function lsg_live_view_shortcode( $atts ) : string {
             <span id="lsg-viewer-count" class="lsg-lv-viewers">– viewers</span>
         </div>
 
-        <!-- ── Two-column player area (video | chat) ── -->
+        <!-- ── Full-width video stage with chat overlaid on top ── -->
         <div class="lsg-lv-columns">
 
-            <!-- LEFT: video -->
+            <!-- Video fills 100% width -->
             <div class="lsg-lv-video-col">
                 <div class="lsg-lv-stage">
                     <?php if ( $is_direct ) : ?>
@@ -210,7 +221,7 @@ function lsg_live_view_shortcode( $atts ) : string {
                     <iframe class="lsg-lv-video"
                         src="<?php echo esc_url( $embed_url ); ?>"
                         frameborder="0"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                         allowfullscreen
                         title="Live Sale Video"
                     ></iframe>
@@ -227,13 +238,15 @@ function lsg_live_view_shortcode( $atts ) : string {
                             </svg>
                         </button>
                     </div>
+
                 </div>
             </div><!-- .lsg-lv-video-col -->
 
-            <!-- RIGHT: chat -->
+            <!-- CHAT OVERLAY — absolutely positioned bottom-left over the video -->
             <div class="lsg-lv-chat-col">
                 <div id="lsg-chat">
-                    <!-- Chat header -->
+
+                    <!-- Chat header (hidden in overlay mode, visible on mobile) -->
                     <div id="lsg-live-bar">
                         <span class="lsg-lv-chat-title">Live Chat</span>
                     </div>
@@ -268,6 +281,7 @@ function lsg_live_view_shortcode( $atts ) : string {
                         </p>
                     </div>
                     <?php endif; ?>
+
                 </div><!-- #lsg-chat -->
             </div><!-- .lsg-lv-chat-col -->
 

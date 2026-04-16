@@ -10,9 +10,9 @@
     width: 100vw;
     margin-left: calc(-50vw + 50%);
     max-width: 100vw;
-    overflow-x: hidden;          /* 100vw includes scrollbar; clip so no h-scroll */
+    overflow-x: hidden;
     box-sizing: border-box;
-    padding: 0 24px 48px;        /* 24px side margins so video+chat never touch browser edge */
+    padding: 0 0 48px;           /* no side margins — video is full-bleed */
     background: #fff;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
@@ -21,7 +21,7 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 14px 24px;
+    padding: 14px 24px;          /* restore side padding inside topbar */
     border-bottom: 1px solid #eee;
 }
 
@@ -49,13 +49,12 @@
 }
 
 /* ----------------------------------------------------------------
-   LIVE VIEW: Two-column layout - video | chat
+   LIVE VIEW: Full-width video with overlay chat (TikTok style)
    ---------------------------------------------------------------- */
 .lsg-lv-columns {
-    display: grid;
-    grid-template-columns: 1fr 380px;
-    gap: 0;
-    width: 100%;               /* explicitly fill the full-bleed wrap */
+    position: relative;          /* positioning context for the absolute chat overlay */
+    display: block;
+    width: 100%;
     max-width: 100%;
     background: #0a0a0a;
 }
@@ -145,94 +144,102 @@
 }
 
 /* ----------------------------------------------------------------
-   CHAT COLUMN (right side)
+   CHAT OVERLAY — TikTok / Instagram Live style
+   Absolutely positioned over the bottom-left of the video
    ---------------------------------------------------------------- */
 .lsg-lv-chat-col {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 32%;
+    min-width: 220px;
+    max-width: 360px;
+    height: 100%;                /* full video height so messages can use it */
+    z-index: 20;
     display: flex;
     flex-direction: column;
-    background: #fff;
-    border-left: 1px solid #e0e0e0;
+    justify-content: flex-end;   /* pin content to bottom */
+    background: transparent;
+    border: none;
+    pointer-events: none;        /* clicks pass through transparent gaps to video */
 }
+
+/* Restore interactivity for the input row only */
+.lsg-lv-chat-col #lsg-chat-footer,
+.lsg-lv-chat-col #lsg-chat-footer * { pointer-events: auto; }
 
 #lsg-chat {
     display: flex;
     flex-direction: column;
-    height: 100%;
-    min-height: 480px;
-    background: #fff;
-    color: #111;
+    background: transparent;
+    color: #fff;
+    overflow: visible;
+}
+
+/* Hide the "Live Chat" header bar — not needed in TikTok overlay */
+.lsg-lv-chat-col #lsg-live-bar { display: none; }
+
+/* ── Messages — overflow hidden, no scroll, grows upward from bottom ── */
+.lsg-lv-chat-col #lsg-chat-messages {
+    flex: 0 1 auto;
     overflow: hidden;
-}
-
-/* Chat header */
-#lsg-live-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px 16px;
-    border-bottom: 1px solid #e8e8e8;
-    background: #fafafa;
-    flex-shrink: 0;
-}
-
-.lsg-lv-chat-title {
-    font-size: 14px;
-    font-weight: 700;
-    color: #111;
-    flex: 1;
-}
-
-/* Messages area */
-#lsg-chat-messages {
-    flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
-    padding: 12px 14px 8px;
+    padding: 0 12px 6px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    scroll-behavior: smooth;
-    background: #fff;
+    justify-content: flex-end;
+    gap: 5px;
+    background: transparent;
+    pointer-events: none;
+    scrollbar-width: none;
 }
 
-#lsg-chat-messages::-webkit-scrollbar { width: 4px; }
-#lsg-chat-messages::-webkit-scrollbar-track { background: #f5f5f5; }
-#lsg-chat-messages::-webkit-scrollbar-thumb { background: #ddd; border-radius: 2px; }
+.lsg-lv-chat-col #lsg-chat-messages::-webkit-scrollbar { display: none; }
 
-/* Older messages fade like live streaming */
-#lsg-chat-messages > *:nth-last-child(n+9) { opacity: 0.25; }
-#lsg-chat-messages > *:nth-last-child(8)   { opacity: 0.38; }
-#lsg-chat-messages > *:nth-last-child(7)   { opacity: 0.50; }
-#lsg-chat-messages > *:nth-last-child(6)   { opacity: 0.62; }
-#lsg-chat-messages > *:nth-last-child(5)   { opacity: 0.76; }
+/* Opacity gradient — older messages at top fade more.
+   The transition on .lsg-chat-msg (opacity 0.55s) makes these
+   animate smoothly as messages shift positions on new arrivals. */
+.lsg-lv-chat-col #lsg-chat-messages > *:nth-last-child(n+9) { opacity: 0 !important; pointer-events: none; }
+.lsg-lv-chat-col #lsg-chat-messages > *:nth-last-child(8)   { opacity: 0.12; }
+.lsg-lv-chat-col #lsg-chat-messages > *:nth-last-child(7)   { opacity: 0.25; }
+.lsg-lv-chat-col #lsg-chat-messages > *:nth-last-child(6)   { opacity: 0.42; }
+.lsg-lv-chat-col #lsg-chat-messages > *:nth-last-child(5)   { opacity: 0.58; }
+.lsg-lv-chat-col #lsg-chat-messages > *:nth-last-child(4)   { opacity: 0.78; }
+/* positions 1-3 remain fully opaque (no rule needed) */
 
+/* ── TikTok-style message bubble ── */
 .lsg-chat-msg {
-    display: flex;
+    display: inline-flex;
     align-items: baseline;
     flex-wrap: wrap;
     gap: 4px;
-    padding: 6px 10px;
-    border-radius: 8px;
-    background: #f7f7f7;
+    padding: 6px 14px;
+    border-radius: 22px;
+    background: rgba(0, 0, 0, 0.52);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
     line-height: 1.5;
-    animation: lsg-msg-in 0.22s ease;
-    transition: opacity 0.4s ease;
+    animation: lsg-msg-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: opacity 0.55s ease, transform 0.55s ease;
+    box-shadow: 0 1px 8px rgba(0,0,0,0.32);
+    max-width: 100%;
 }
 
 @keyframes lsg-msg-in {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: translateY(0); }
+    0%   { opacity: 0; transform: translateY(20px) scale(0.88); }
+    60%  { opacity: 1; transform: translateY(-4px) scale(1.02); }
+    100% { opacity: 1; transform: translateY(0)    scale(1);    }
 }
 
 .lsg-chat-username {
     font-weight: 700;
     font-size: 12.5px;
     flex-shrink: 0;
-    color: #1557b0;
+    /* color set inline by JS — bright palette looks great on dark bubble */
+    filter: brightness(1.25) saturate(1.15);
 }
 
 .lsg-admin-badge {
-    background: #1557b0;
+    background: rgba(255,255,255,0.22);
     color: #fff;
     font-size: 9px;
     font-weight: 700;
@@ -244,14 +251,14 @@
 }
 
 .lsg-chat-sep {
-    color: #bbb;
+    color: rgba(255,255,255,0.45);
     font-size: 12px;
     flex-shrink: 0;
 }
 
 .lsg-chat-text {
     font-size: 13px;
-    color: #333;
+    color: #fff;
     word-break: break-word;
     flex: 1;
     min-width: 0;
@@ -259,48 +266,50 @@
 
 .lsg-join-notif {
     font-size: 11px;
-    color: #aaa;
-    text-align: center;
-    padding: 3px 0;
+    color: rgba(255,255,255,0.55);
+    text-align: left;
+    padding: 2px 4px;
     animation: lsg-msg-in 0.25s ease;
 }
 
-.lsg-chat-failed { background: rgba(229,57,53,0.08) !important; }
+.lsg-chat-failed { background: rgba(229,57,53,0.55) !important; }
 
 .lsg-sending-tick {
     font-size: 11px;
-    color: #bbb;
+    color: rgba(255,255,255,0.55);
     animation: lsg-tick-blink 1s ease infinite;
     display: inline-block;
 }
 
 @keyframes lsg-tick-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
-/* Chat footer / input */
-#lsg-chat-footer {
-    padding: 10px 14px 14px;
-    background: #fafafa;
-    border-top: 1px solid #e8e8e8;
+/* ── Chat footer — gradient scrim + glass input ── */
+.lsg-lv-chat-col #lsg-chat-footer {
+    padding: 10px 12px 14px;
+    background: linear-gradient(to top, rgba(0,0,0,0.60) 0%, transparent 100%);
+    border: none;
     flex-shrink: 0;
 }
 
 #lsg-chat-input-row { display: flex; gap: 8px; align-items: center; }
 
-#lsg-chat-input {
+.lsg-lv-chat-col #lsg-chat-input {
     flex: 1;
     padding: 10px 16px;
-    border: 1.5px solid #ddd;
+    border: 1.5px solid rgba(255,255,255,0.35);
     border-radius: 24px;
     font-size: 13px;
     outline: none;
-    background: #fff;
-    color: #111;
-    caret-color: #1557b0;
+    background: rgba(255,255,255,0.15);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: #fff;
+    caret-color: #fff;
     transition: border-color 0.2s;
 }
 
-#lsg-chat-input:focus { border-color: #1557b0; }
-#lsg-chat-input::placeholder { color: #aaa; }
+.lsg-lv-chat-col #lsg-chat-input:focus { border-color: rgba(255,255,255,0.75); }
+.lsg-lv-chat-col #lsg-chat-input::placeholder { color: rgba(255,255,255,0.55); }
 
 #lsg-chat-send {
     width: 40px;
@@ -315,29 +324,29 @@
     flex-shrink: 0;
     padding: 0;
     transition: background 0.2s, transform 0.1s;
-    box-shadow: 0 2px 8px rgba(21,87,176,0.3);
+    box-shadow: 0 2px 8px rgba(21,87,176,0.45);
 }
 
 #lsg-chat-send:hover  { background: #0d3e8a; }
 #lsg-chat-send:active { transform: scale(0.9); }
 #lsg-chat-send svg    { width: 17px; height: 17px; fill: #fff; }
-#lsg-chat-send:disabled { background: #c5d5ee; cursor: not-allowed; box-shadow: none; }
+#lsg-chat-send:disabled { background: rgba(21,87,176,0.35); cursor: not-allowed; box-shadow: none; }
 
-#lsg-chat-login-prompt {
-    text-align: center;
+.lsg-lv-chat-col #lsg-chat-login-prompt {
+    text-align: left;
     font-size: 13px;
-    color: #777;
-    padding: 10px 8px;
+    color: rgba(255,255,255,0.75);
+    padding: 10px 4px;
     margin: 0;
 }
 
-#lsg-chat-login-prompt a {
-    color: #1557b0;
+.lsg-lv-chat-col #lsg-chat-login-prompt a {
+    color: #7dd3fc;
     font-weight: 600;
     text-decoration: none;
 }
 
-#lsg-chat-login-prompt a:hover { text-decoration: underline; }
+.lsg-lv-chat-col #lsg-chat-login-prompt a:hover { text-decoration: underline; }
 
 /* Skeleton loader */
 .lsg-skel-row {
@@ -373,23 +382,103 @@
 .lsg-lv-products {
     max-width: 1400px;
     margin: 0 auto;
-    /* side padding comes from .lsg-lv-wrap — no extra padding needed here */
+    padding: 0 24px;             /* restore side padding removed from .lsg-lv-wrap */
 }
 
 /* ----------------------------------------------------------------
    RESPONSIVE
    ---------------------------------------------------------------- */
+
+/* Tablet — narrower overlay */
 @media (max-width: 1024px) {
-    .lsg-lv-columns { grid-template-columns: 1fr 320px; }
+    .lsg-lv-chat-col { width: 38%; min-width: 200px; }
 }
 
+/* Mobile — drop the overlay, stack chat below video as a panel */
 @media (max-width: 768px) {
-    .lsg-lv-columns { grid-template-columns: 1fr; }
-
     .lsg-lv-chat-col {
-        border-left: none;
+        position: relative;      /* back to normal flow */
+        width: 100%;
+        max-width: 100%;
+        height: auto;
+        background: #fff;
         border-top: 1px solid #e0e0e0;
+        justify-content: flex-start;
     }
 
-    #lsg-chat { min-height: 380px; }
+    /* Restore the chat header bar on mobile */
+    .lsg-lv-chat-col #lsg-live-bar {
+        display: flex;
+        background: #fafafa;
+        border-bottom: 1px solid #e8e8e8;
+        padding: 12px 16px;
+    }
+
+    #lsg-chat {
+        background: #fff;
+        color: #111;
+        min-height: 360px;
+        overflow: hidden;
+    }
+
+    .lsg-lv-chat-col #lsg-chat-messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px 14px 8px;
+        justify-content: flex-start;
+        scrollbar-width: thin;
+        pointer-events: auto;
+    }
+
+    .lsg-lv-chat-col #lsg-chat-messages::-webkit-scrollbar { display: block; width: 4px; }
+    .lsg-lv-chat-col #lsg-chat-messages::-webkit-scrollbar-track { background: #f5f5f5; }
+    .lsg-lv-chat-col #lsg-chat-messages::-webkit-scrollbar-thumb { background: #ddd; border-radius: 2px; }
+
+    /* Reset nth-last-child fade overrides */
+    .lsg-lv-chat-col #lsg-chat-messages > *:nth-last-child(n+9),
+    .lsg-lv-chat-col #lsg-chat-messages > *:nth-last-child(8),
+    .lsg-lv-chat-col #lsg-chat-messages > *:nth-last-child(7),
+    .lsg-lv-chat-col #lsg-chat-messages > *:nth-last-child(6),
+    .lsg-lv-chat-col #lsg-chat-messages > *:nth-last-child(5),
+    .lsg-lv-chat-col #lsg-chat-messages > *:nth-last-child(4) { opacity: 1 !important; }
+
+    /* Revert to light bubble on mobile */
+    .lsg-chat-msg {
+        background: #f7f7f7;
+        border-radius: 8px;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        box-shadow: none;
+        display: flex;
+        width: 100%;
+    }
+
+    .lsg-chat-username { filter: none; }
+    .lsg-chat-sep  { color: #bbb; }
+    .lsg-chat-text { color: #333; }
+    .lsg-join-notif { color: #aaa; text-align: center; }
+    .lsg-chat-failed { background: rgba(229,57,53,0.08) !important; }
+    .lsg-sending-tick { color: #bbb; }
+
+    .lsg-lv-chat-col #lsg-chat-footer {
+        background: #fafafa;
+        border-top: 1px solid #e8e8e8;
+    }
+
+    .lsg-lv-chat-col #lsg-chat-input {
+        background: #fff;
+        border: 1.5px solid #ddd;
+        color: #111;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        caret-color: #1557b0;
+    }
+
+    .lsg-lv-chat-col #lsg-chat-input:focus { border-color: #1557b0; }
+    .lsg-lv-chat-col #lsg-chat-input::placeholder { color: #aaa; }
+
+    .lsg-lv-chat-col #lsg-chat-login-prompt { color: #777; text-align: center; }
+    .lsg-lv-chat-col #lsg-chat-login-prompt a { color: #1557b0; }
+
+    .lsg-lv-products { padding: 0 16px; }
 }

@@ -31,11 +31,11 @@ jQuery(function($){
         return (d.getMonth()+1) + '/' + d.getDate() + ' ' + d.getHours() + ':' + (d.getMinutes()<10?'0':'') + d.getMinutes();
     }
 
-    function appendMsg(index, user, msg, ts) {
+    function appendMsg(index, user, msg, ts, autoRemove) {
         var color   = avatarColor(user);
         var isAdmin = (user === 'Admin');
         var badge   = isAdmin ? ' <span class="lsg-admin-badge">Admin</span>' : '';
-        $('#lsg-chat-messages').append(
+        var $msg = $(
             '<div class="lsg-chat-msg" data-index="' + index + '">' +
                 '<span class="lsg-chat-username" style="color:' + color + '">' + esc(user) + '</span>' +
                 badge +
@@ -43,6 +43,21 @@ jQuery(function($){
                 '<span class="lsg-chat-text">' + esc(msg) + '</span>' +
             '</div>'
         );
+        $('#lsg-chat-messages').append($msg);
+        renderedMsgCount++;
+
+        // Enforce max visible cap — drop the oldest bubble if over limit
+        var $all = $('#lsg-chat-messages .lsg-chat-msg');
+        if ($all.length > MAX_OVERLAY_MSGS) { $all.first().remove(); }
+
+        // Auto-fade and self-remove — only for live new messages, not history
+        if (autoRemove) {
+            var $el = $msg;
+            setTimeout(function() {
+                $el.css({ opacity: '0', transform: 'translateY(-8px)' });
+                setTimeout(function() { $el.remove(); }, 560);
+            }, MSG_LIFETIME_MS);
+        }
     }
 
     function scrollBottom(){ var el = document.getElementById('lsg-chat-messages'); el.scrollTop = el.scrollHeight; }
@@ -50,6 +65,9 @@ jQuery(function($){
     var lastMsgHash = '';
     var initialLoad = true;
     var seenUsers = {};
+    var renderedMsgCount = 0;    // tracks server-fetched messages appended to overlay
+    var MAX_OVERLAY_MSGS = 8;    // max bubbles visible at once
+    var MSG_LIFETIME_MS  = 7000; // ms before a bubble fades out and self-removes
 
     function showJoinNotif(user) {
         var $n = $('<div class="lsg-join-notif">👋 ' + esc(user) + ' joined</div>');
@@ -84,6 +102,7 @@ jQuery(function($){
         $.post(AJAX, { action: 'lsg_fetch_chat', _ajax_nonce: chatNonce }, function(r){
             if (!r.success) return;
             var data = r.data;
+            var wasInitialLoad = initialLoad; // capture before mutating
             if (initialLoad) {
                 initialLoad = false;
                 $('#lsg-chat-messages').empty();
@@ -94,20 +113,22 @@ jQuery(function($){
             if (hash === lastMsgHash) return; // nothing changed — no re-render, no flash
             lastMsgHash = hash;
 
-            var existingCount = $('#lsg-chat-messages .lsg-chat-msg').length;
+            var existingCount = renderedMsgCount;
 
             if (data.length >= existingCount) {
                 // Only new messages added — append only the new ones, never wipe
                 var newUsersList = [];
                 $.each(data.slice(existingCount), function(i, m){
                     if (m.user && !seenUsers[m.user]) { newUsersList.push(m.user); seenUsers[m.user] = true; }
-                    appendMsg(existingCount + i, m.user, m.msg, m.ts);
+                    // History (first load): keep permanently. Live new messages: auto-remove.
+                    appendMsg(existingCount + i, m.user, m.msg, m.ts, !wasInitialLoad);
                 });
                 $.each(newUsersList, function(_, u){ showJoinNotif(u); });
             } else {
-                // Admin deleted a message — minimal re-render
+                // Admin deleted a message — full re-render (history, no auto-remove)
                 $('#lsg-chat-messages').empty();
-                $.each(data, function(i, m){ appendMsg(i, m.user, m.msg, m.ts); });
+                renderedMsgCount = 0;
+                $.each(data, function(i, m){ appendMsg(i, m.user, m.msg, m.ts, false); });
             }
             scrollBottom();
             updateViewerCount(data);
@@ -137,6 +158,21 @@ jQuery(function($){
                 '<span class="lsg-sending-tick"> ⋯</span>' +
             '</div>'
         );
+        // Count the pending bubble so loadChat’s slice stays correct
+        renderedMsgCount++;
+        // Enforce cap — drop oldest if over limit
+        var $allPre = $('#lsg-chat-messages .lsg-chat-msg');
+        if ($allPre.length > MAX_OVERLAY_MSGS) { $allPre.first().remove(); }
+        // TikTok-style: pending bubble also fades out after lifetime
+        (function(pid) {
+            setTimeout(function() {
+                var $p = $('#' + pid);
+                if ($p.length) {
+                    $p.css({ opacity: '0', transform: 'translateY(-8px)' });
+                    setTimeout(function() { $p.remove(); }, 560);
+                }
+            }, MSG_LIFETIME_MS);
+        })(pendingId);
         scrollBottom();
 
         var action = IS_ADMIN ? 'lsg_admin_send_chat' : 'lsg_send_chat';
