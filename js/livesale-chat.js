@@ -50,14 +50,9 @@ jQuery(function($){
         var $all = $('#lsg-chat-messages .lsg-chat-msg');
         if ($all.length > MAX_OVERLAY_MSGS) { $all.first().remove(); }
 
-        // Auto-fade and self-remove — only for live new messages, not history
-        if (autoRemove) {
-            var $el = $msg;
-            setTimeout(function() {
-                $el.css({ opacity: '0', transform: 'translateY(-8px)' });
-                setTimeout(function() { $el.remove(); }, 560);
-            }, MSG_LIFETIME_MS);
-        }
+        // Messages are removed only by the MAX_OVERLAY_MSGS cap (oldest dropped when
+        // a new bubble arrives) — never by a timer, which would break poll sync state.
+        void autoRemove;
     }
 
     function scrollBottom(){ var el = document.getElementById('lsg-chat-messages'); el.scrollTop = el.scrollHeight; }
@@ -163,16 +158,6 @@ jQuery(function($){
         // Enforce cap — drop oldest if over limit
         var $allPre = $('#lsg-chat-messages .lsg-chat-msg');
         if ($allPre.length > MAX_OVERLAY_MSGS) { $allPre.first().remove(); }
-        // TikTok-style: pending bubble also fades out after lifetime
-        (function(pid) {
-            setTimeout(function() {
-                var $p = $('#' + pid);
-                if ($p.length) {
-                    $p.css({ opacity: '0', transform: 'translateY(-8px)' });
-                    setTimeout(function() { $p.remove(); }, 560);
-                }
-            }, MSG_LIFETIME_MS);
-        })(pendingId);
         scrollBottom();
 
         var action = IS_ADMIN ? 'lsg_admin_send_chat' : 'lsg_send_chat';
