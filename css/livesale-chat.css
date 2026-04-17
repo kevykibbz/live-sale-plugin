@@ -152,9 +152,9 @@
     position: absolute;
     bottom: 0;
     left: 0;
-    width: 32%;
+    width: 50%;
     min-width: 220px;
-    max-width: 360px;
+    max-width: 50%;
     height: 100%;                /* full video height so messages can use it */
     z-index: 20;
     display: flex;
