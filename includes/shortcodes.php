@@ -30,8 +30,14 @@ function lsg_grid_shortcode( $atts ) : string {
         'lsg-grid',
         plugin_dir_url( dirname( __FILE__ ) ) . 'css/livesale-grid.css',
         [],
-        '5.3'
+        '5.4'
     );
+    // Inject customizer CSS vars immediately after enqueueing — must happen here
+    // because the style is enqueued inside the shortcode (after wp_enqueue_scripts
+    // has already fired), so the lsg_customizer_inline_css wp_enqueue_scripts hook
+    // always misses it. Calling wp_add_inline_style here guarantees the
+    // --lsg-cols / --lsg-gap / --lsg-radius overrides are always output.
+    wp_add_inline_style( 'lsg-grid', lsg_build_custom_props_css() );
 
     // Enqueue JS
     wp_enqueue_script(
@@ -48,9 +54,10 @@ function lsg_grid_shortcode( $atts ) : string {
             $u = wp_get_current_user();
             return $u && $u->exists() ? ( $u->display_name ?: $u->user_login ) : '';
         } )(),
-        'socketio_url'     => LSG_SOCKETIO_URL,
-        'socketio_channel' => LSG_SOCKETIO_PRODUCT_CHANNEL,
-        'init_version' => (int) get_option( 'lsg_global_version', 0 ),
+        'socketio_url'      => LSG_SOCKETIO_URL,
+        'socketio_channel'  => LSG_SOCKETIO_PRODUCT_CHANNEL,
+        'init_version'      => (int) get_option( 'lsg_global_version', 0 ),
+        'websocket_only'    => LSG_WEBSOCKET_ONLY ? '1' : '0',
     ] );
 
     // Lightbox + auction countdown — injected once in footer
@@ -148,7 +155,7 @@ function lsg_chat_shortcode( $atts ) : string {
         'lsg-chat',
         plugin_dir_url( dirname( __FILE__ ) ) . 'css/livesale-chat.css',
         [],
-        '5.0'
+        '6.1'
     );
     wp_enqueue_script(
         'lsg-chat-js',
@@ -162,7 +169,7 @@ function lsg_chat_shortcode( $atts ) : string {
     $username     = $current_user->exists() ? ( $current_user->display_name ?: $current_user->user_login ) : '';
     wp_localize_script( 'lsg-chat-js', 'lsgChat', [
         'ajax'         => admin_url( 'admin-ajax.php' ),
-        'nonce'        => wp_create_nonce( 'lsg_chat' ),
+        'nonce'        => wp_create_nonce( 'lsg_chat_nonce' ),
         'is_admin'     => current_user_can( 'manage_woocommerce' ) ? '1' : '0',
         'username'     => $username,
         'socketio_url'     => LSG_SOCKETIO_URL,
@@ -690,9 +697,10 @@ function lsg_auction_widget_shortcode( $atts ) : string {
             $u = wp_get_current_user();
             return $u && $u->exists() ? ( $u->display_name ?: $u->user_login ) : '';
         } )(),
-        'socketio_url'     => LSG_SOCKETIO_URL,
-        'socketio_channel' => LSG_SOCKETIO_PRODUCT_CHANNEL,
-        'init_version' => (int) get_option( 'lsg_global_version', 0 ),
+        'socketio_url'      => LSG_SOCKETIO_URL,
+        'socketio_channel'  => LSG_SOCKETIO_PRODUCT_CHANNEL,
+        'init_version'      => (int) get_option( 'lsg_global_version', 0 ),
+        'websocket_only'    => LSG_WEBSOCKET_ONLY ? '1' : '0',
     ] );
 
     $d = lsg_get_product_data( $pid );

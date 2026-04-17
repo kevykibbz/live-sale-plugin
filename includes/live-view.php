@@ -109,7 +109,7 @@ function lsg_live_view_shortcode( $atts ) : string {
         'lsg-chat',
         plugin_dir_url( dirname( __FILE__ ) ) . 'css/livesale-chat.css',
         [],
-        '6.0'
+        '6.1'
     );
     wp_enqueue_script(
         'lsg-chat-js',
